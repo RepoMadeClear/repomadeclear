@@ -269,3 +269,10 @@ Local test bypass was removed at the user’s request on 2026-10-30. Normal mana
 - Validation: 65 automated tests pass; npm run test:storage passes in local PostgreSQL-compatible PGlite for archive, annotations, stale saves, version conflicts, cache and user separation. Hosted build passes with public Supabase config.
 - REQUIRED BEFORE DEPLOY: apply migration 009 to dedicated Supabase project; verify legacy migration and concurrent live sessions; exercise GitHub download bounds and visually verify new workflow navigation. Do not deploy paid-map.js before its save RPC exists. Current production remains unchanged.
 - Changes saved in local canonical VS Code repository; not committed or pushed by this task.
+
+## Production deployment — 2026-11-09
+- Applied migration 009 to dedicated Supabase project ylefxstaiqvnhksbcapa; dashboard confirmed history table and safe-edit RPC exist.
+- Vercel deployment dpl_HBziZHJBQ2TYf1dDaTsLL3dHdRfs is READY and aliased to https://www.repomadeclear.com. Deployed matching staging app via CLI.
+- Live smoke checks: HTTP 200; 5,000 tree entries, 200 supported files, 20 MB supported source, Python and rescan copy present; unauthenticated details request returns 401.
+- 65 automated tests and local storage regression checks passed before deployment. A signed-in live GitHub rescan/edit walkthrough has not yet been verified.
+- Preview build failed because Preview lacks public Supabase settings; production build succeeded with its existing environment.
