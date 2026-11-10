@@ -26,7 +26,7 @@ test('scan storage is scoped to selected repository and cached content must matc
 test('scan limits explain the distinct cause and retry rules',async()=>{
  const {scanLimitMessage}=await import('../src/hosted-scan.js');
  assert.match(scanLimitMessage({reason:'running',retryAt:'2026-11-10T00:00:00Z'}),/already running.*Tue, 10 Nov 2026/);
- assert.match(scanLimitMessage({reason:'daily_limit',retryAt:'2026-11-10T00:00:00Z'}),/5 of 5.*Failed scans count/);
+ assert.match(scanLimitMessage({reason:'daily_limit',retryAt:'2026-11-10T00:00:00Z'}),/10 of 10.*Failed scans count/);
  assert.match(scanLimitMessage({reason:'map_limit'}),/10 of 10.*will not reset/);
  assert.match(scanLimitMessage({completed:true}),/earlier commit/);
 });

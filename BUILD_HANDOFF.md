@@ -1,3 +1,7 @@
+## Ten daily attempts — 2026-11-09
+
+User approved 10 daily scan attempts. Migration 008 applied and verified. Existing counts retained; the separate 10 saved-map cap is unchanged. Messages and terms updated. Targeted scan tests: 5 pass. Deployment dpl_5YmkS46wihjtFMVpUCcaxGKs8k4M READY on www.repomadeclear.com; live ten-attempt terms verified.
+
 ## Five daily attempts — 2026-11-09
 
 User approved five daily scan attempts. Migration 007 applied and verified in Supabase; existing attempt counts preserved. Updated UI and limit messages to five, targeted scanner tests pass (5). Deployment dpl_DXYsjKod3sEYP7s2rQfus72vuuZU READY on www.repomadeclear.com; live five-attempt wording verified.

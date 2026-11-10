@@ -55,7 +55,7 @@ export function scanLimitMessage(claim){
  const retry=claim.retryAt&&Number.isFinite(Date.parse(claim.retryAt))?new Date(claim.retryAt).toUTCString():null;
  if(claim.completed)return 'This repository and branch already have a saved map from an earlier commit. Scanning changed code is not available yet.';
  if(claim.reason==='running')return `Another scan is already running for your account. Wait for it to finish${retry?`, or retry after ${retry}`:''}. This request did not use another attempt.`;
- if(claim.reason==='daily_limit')return `Daily scan limit reached: 5 of 5 attempts used. Failed scans count too.${retry?` You can scan again after ${retry}.`:' The allowance resets at midnight UTC.'} Saved unchanged scans can still be reopened.`;
+ if(claim.reason==='daily_limit')return `Daily scan limit reached: 10 of 10 attempts used. Failed scans count too.${retry?` You can scan again after ${retry}.`:' The allowance resets at midnight UTC.'} Saved unchanged scans can still be reopened.`;
  if(claim.reason==='map_limit')return 'Saved-map limit reached: 10 of 10 repository/branch maps saved. You can reopen existing maps. Waiting until tomorrow will not reset this limit.';
  return 'Scanning is temporarily unavailable. We could not identify the limit; please try again later.';
 }
