@@ -19,10 +19,6 @@
     "stripe": "23.1.0",
     "typescript": "5.9.3"
   },
-  "engines": {
-    "node": ">=22"
-  },
-  "devDependencies": {
-    "@electric-sql/pglite": "^0.5.16"
-  }
+  "engines": { "node": ">=22" },
+  "devDependencies": { "@electric-sql/pglite": "^0.5.16" }
 }

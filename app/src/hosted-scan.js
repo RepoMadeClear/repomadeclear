@@ -1,7 +1,9 @@
 import {createHash} from 'node:crypto';
 import {scanSnapshot, excluded, safeName, VERSION} from './scanner.js';
+import {isSupportedSource} from './supported-languages.js';
 import {credentialVault} from './github-store.js';
 import {HttpError} from './providers.js';
+
 export function overview(scan) {
   const groups=new Map(), membership=new Map();
   for(const node of scan.nodes) {
@@ -11,9 +13,17 @@ export function overview(scan) {
     groups.get(key).count++; membership.set(node.id,key);
   }
   const links=new Map();
-  for(const edge of scan.edges) {const source=membership.get(edge.source),target=membership.get(edge.target);if(source!==target) {const key=source+':'+target; if(!links.has(key))links.set(key,{source,target,count:0});links.get(key).count++;}}
+  for(const edge of scan.edges) {
+    const source=membership.get(edge.source),target=membership.get(edge.target);
+    if(source!==target) {
+      const key=source+':'+target;
+      if(!links.has(key))links.set(key,{source,target,count:0});
+      links.get(key).count++;
+    }
+  }
   return {repository:scan.repository,branch:scan.branch,commit:scan.commit,scannedAt:scan.scannedAt,groups:[...groups.values()],connections:[...links.values()],coverage:scan.coverage};
 }
+
 export async function runHostedScan({config,token,user,service,githubToken,body,storage}) {
   if(body.consent!==true) throw new HttpError(400,'Review the coverage and free preview limits before scanning.');
   const repo=(await service.repositories(githubToken,body.installation)).find(r=>String(r.id)===String(body.repository));
@@ -31,7 +41,11 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
   const legacy=await db('legacy',scope);
   if(legacy.envelope){const previous=await vault.open(legacy.envelope,user,'scan');if(previous.scan.repository===repo.full_name&&previous.scan.branch===branch.name)scope.legacyKey=legacy.key;}
   const claim=await db('begin',scope);
-  if(claim.envelope) {const saved=await vault.open(claim.envelope,user,'scan');if(saved.scan.repository!==repo.full_name || saved.scan.commit!==commit || saved.scan.branch!==branch.name)throw new HttpError(403,'Saved scan does not match this repository.');return {overview:{...overview(saved.scan),branch:branch.name},scanKey:key,cached:true};}
+  if(claim.envelope) {
+    const saved=await vault.open(claim.envelope,user,'scan');
+    if(saved.scan.repository!==repo.full_name || saved.scan.commit!==commit || saved.scan.branch!==branch.name)throw new HttpError(403,'Saved scan does not match this repository.');
+    return {overview:{...overview(saved.scan),branch:branch.name},scanKey:key,cached:true};
+  }
   if(!claim.allowed) throw new HttpError(429,scanLimitMessage(claim));
   try {
     const deadline=Date.now()+40000;
@@ -39,15 +53,31 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
     const result=await service.githubRead(`${route}/git/trees/${commit}?recursive=1`,githubToken);
     if(result.truncated || !Array.isArray(result.tree) || result.tree.length>5000) throw new HttpError(422,'Preview supports repositories with at most 5,000 tree entries.');
     const tree=result.tree.map(x=>({mode:x.mode,type:x.type,hash:x.sha,size:x.size||0,file:x.path}));
-    const supported=tree.filter(x=>['100644','100755'].includes(x.mode)&&/\.(?:[cm]?js|jsx|ts|tsx|py)$/.test(x.file)&&!excluded.test(x.file)&&safeName(x.file));
-    if(!supported.length)throw new HttpError(422,'No supported source files found. Choose a repository with supported JavaScript, TypeScript or Python files.');
-    if(supported.length>200)throw new HttpError(422,`Source file limit reached: ${supported.length} supported files found; maximum 200.`);
-    if(supported.some(x=>x.size>200000))throw new HttpError(422,'A supported source file exceeds the 200 KB per-file limit.');
-    if(supported.reduce((n,x)=>n+x.size,0)>20000000)throw new HttpError(422,'Supported source exceeds 20 MB. Images and documentation do not count toward this limit.');
+    const supported=tree.filter(x=>['100644','100755'].includes(x.mode)&&isSupportedSource(x.file)&&!excluded.test(x.file)&&safeName(x.file));
+    if(!supported.length)throw new HttpError(422,'No recognized source files found.');
+    if(supported.length>200)throw new HttpError(422,`Source file limit reached: ${supported.length} recognized source files found; maximum 200.`);
+    if(supported.some(x=>x.size>200000))throw new HttpError(422,'A recognized source file exceeds the 200 KB per-file limit.');
+    if(supported.reduce((n,x)=>n+x.size,0)>20000000)throw new HttpError(422,'Recognized source exceeds 20 MB. Images and documentation do not count toward this limit.');
     const content=new Map();let next=0;
-    await Promise.all(Array.from({length:4},async()=>{while(next<supported.length){const entry=supported[next++];if(Date.now()>deadline)throw new HttpError(422,'Scan time limit reached.');const blob=await service.githubRead(`${route}/git/blobs/${entry.hash}`,githubToken);if(blob.encoding!=='base64'||blob.size>200000||blob.content.length>280000)throw new HttpError(422,'Unsupported source blob.');const bytes=Buffer.from(blob.content,'base64');if(bytes.length!==entry.size)throw new HttpError(422,'Source size changed unexpectedly.');content.set(entry.hash,bytes.toString('utf8'));}}));
+    await Promise.all(Array.from({length:4},async()=>{
+      while(next<supported.length){
+        const entry=supported[next++];
+        if(Date.now()>deadline)throw new HttpError(422,'Scan time limit reached.');
+        const blob=await service.githubRead(`${route}/git/blobs/${entry.hash}`,githubToken);
+        if(blob.encoding!=='base64'||blob.size>200000||blob.content.length>280000)throw new HttpError(422,'Unsupported source blob.');
+        const bytes=Buffer.from(blob.content,'base64');
+        if(bytes.length!==entry.size)throw new HttpError(422,'Source size changed unexpectedly.');
+        content.set(entry.hash,bytes.toString('utf8'));
+      }
+    }));
     let scan;
-    try {scan=scanSnapshot({tree,commit,branch:branch.name,repository:repo.full_name,read:e=>content.get(e.hash),limits:{files:5000,bytes:20000000,fileBytes:200000,milliseconds:8000,edges:2000}});}catch {throw new HttpError(422,'This repository exceeds supported scan limits or contains unsupported source syntax.');}
+    try {
+      scan=scanSnapshot({tree,commit,branch:branch.name,repository:repo.full_name,read:e=>content.get(e.hash),limits:{files:5000,bytes:20000000,fileBytes:200000,milliseconds:8000,edges:2000}});
+    } catch(error) {
+      // Avoid leaking source paths and parser details to the public response.
+      if(/limit exceeded|size limit exceeded/i.test(error.message))throw new HttpError(422,'Repository exceeded the scanner processing or connection limit.');
+      throw new HttpError(422,'Source analysis failed. A recognized file may contain unsupported syntax.');
+    }
     const envelope=await vault.seal({scan},user,'scan',315360000);
     if(envelope.length>1500000)throw new HttpError(422,'Scan evidence exceeds the preview storage limit.');
     await db('finish',{...scope,envelope});
@@ -56,11 +86,11 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
 }
 
 export function scanLimitMessage(claim){
- const retry=claim.retryAt&&Number.isFinite(Date.parse(claim.retryAt))?new Date(claim.retryAt).toUTCString():null;
- if(claim.completed)return 'This repository and branch already have a saved map from an earlier commit. Scanning changed code is not available yet.';
- if(claim.reason==='history_limit')return 'Saved scan history limit reached: 100 previous versions retained. Existing maps and annotations remain available.';
- if(claim.reason==='running')return `Another scan is already running for your account. Wait for it to finish${retry?`, or retry after ${retry}`:''}. This request did not use another attempt.`;
- if(claim.reason==='daily_limit')return `Daily scan limit reached: 10 of 10 attempts used. Failed scans count too.${retry?` You can scan again after ${retry}.`:' The allowance resets at midnight UTC.'} Saved unchanged scans can still be reopened.`;
- if(claim.reason==='map_limit')return 'Saved-map limit reached: 10 of 10 repository/branch maps saved. You can reopen existing maps. Waiting until tomorrow will not reset this limit.';
- return 'Scanning is temporarily unavailable. We could not identify the limit; please try again later.';
+  const retry=claim.retryAt&&Number.isFinite(Date.parse(claim.retryAt))?new Date(claim.retryAt).toUTCString():null;
+  if(claim.completed)return 'This repository and branch already have a saved map from an earlier commit. Scanning changed code is not available yet.';
+  if(claim.reason==='history_limit')return 'Saved scan history limit reached: 100 previous versions retained. Existing maps and annotations remain available.';
+  if(claim.reason==='running')return `Another scan is already running for your account. Wait for it to finish${retry?`, or retry after ${retry}`:''}. This request did not use another attempt.`;
+  if(claim.reason==='daily_limit')return `Daily scan limit reached: 10 of 10 attempts used. Failed scans count too.${retry?` You can scan again after ${retry}.`:' The allowance resets at midnight UTC.'} Saved unchanged scans can still be reopened.`;
+  if(claim.reason==='map_limit')return 'Saved-map limit reached: 10 of 10 repository/branch maps saved. You can reopen existing maps. Waiting until tomorrow will not reset this limit.';
+  return 'Scanning is temporarily unavailable. We could not identify the limit; please try again later.';
 }
