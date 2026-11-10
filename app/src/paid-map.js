@@ -35,10 +35,17 @@ export async function paidMap({config,user,repository,body},dependencies={}){
   const envelope=await vault.seal({overlay},user.id,'overlay',315360000);
   if(envelope.length>200000)throw new HttpError(413,'This map has reached its editing storage limit.');
   const value={user_id:user.id,scan_key:saved.scan_key,envelope,version:version+1,updated_at:new Date().toISOString()};
+  if(scanKey){
+   const result=await payments.db.rpc('rmc_save_repository_overlay',{p_user:user.id,p_repository:String(repository.id),p_branch:scan.branch,p_key:saved.scan_key,p_envelope:envelope,p_version:version});
+   if(result.error||result.data!==true)throw new HttpError(409,'This map was rescanned or edited in another tab. Reload before saving.');
+   version++;
+  }else{
   let write=hasCurrentOverlay?payments.db.from(overlayTable).update(value).eq('user_id',user.id).eq('version',version):payments.db.from(overlayTable).insert(value);
   if(hasCurrentOverlay&&scanKey)write=write.eq('scan_key',saved.scan_key);
   const result=await write.select('version');
   if(result.error||!result.data?.length)throw new HttpError(409,'Another edit was saved first. Reload before continuing.');version++;
+  }
+
  }
  return {scan,overlay,version,access:{paid:true,source:access.source||'subscription',accessUntil:access.accessUntil}};
 }

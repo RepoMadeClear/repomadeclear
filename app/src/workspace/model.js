@@ -1,4 +1,6 @@
 export function describe(node) {
+ const kinds={'function':'Functions','api-endpoint':'API endpoints','http-request':'Frontend requests','database-table':'Database operations','external-service':'External services'};
+ if(kinds[node.kind])return {title:node.label,explanation:node.explanation,group:kinds[node.kind],basis:node.certainty==='inferred'?'Inferred source relationship':'Detected source declaration'};
  const name=node.label.split('/').pop();
  const roles={
  'billing.js':['Payment checks','Checks whether a repository has a paid subscription before its detailed map can be opened.','Hosted repository service'],
@@ -38,6 +40,7 @@ export function connectionDescription(edge, nodes) {
  const a=nodes.find(n=>n.id===edge.source),b=nodes.find(n=>n.id===edge.target);
  const from=a?.title||a?.label||'This component',to=b?.title||b?.label||'another component';
  if(edge.certainty==='human-supplied')return {label:'Added by a person',text:edge.human?.explanation||edge.explanation||`${from} is connected to ${to} according to a human edit.`,limit:'This connection is human-supplied, not established by the scan.'};
+ if(['calls-function','defines-function','declares-endpoint','handled-by','requests-http','requests-service','may-request-endpoint'].includes(edge.kind)||edge.kind.startsWith('database-'))return {label:edge.kind.replaceAll('-',' '),text:edge.explanation,limit:edge.certainty==='inferred'?'Inferred from matching source patterns; verify deployment and runtime behavior.':'Detected in source code; this does not prove the operation ran successfully.'};
  if(edge.kind==='type-reference')return {label:'Shares a definition',text:`${from} refers to definitions from ${to}. Think of this as agreeing on the shape of information, rather than sending information.`,limit:'A type reference does not show a call, data transfer, or execution order.'};
  return {label:edge.kind==='references-package'?'Names a library':'References another file',text:`${from} names ${to} in its source code. ${edge.kind==='references-package'?'This identifies a software tool the code refers to.':'This shows a direct source-code relationship between these parts.'}`,limit:'The arrow does not prove a live request, a data transfer, or which part runs first.'};
 }

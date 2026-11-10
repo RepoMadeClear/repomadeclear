@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import ts from 'typescript';
+import {detectPython} from './python-relationships.js';
+import {detectRelationships} from './relationships.js';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const LIMITS = Object.freeze({ files: 2000, bytes: 20_000_000, fileBytes: 500_000, milliseconds: 15000, edges: 10000 });
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 export const excluded = /(^|\/)(node_modules|vendor|dist|build|\.next|\.git|coverage|test|tests|__tests__|fixtures)(\/|$)|(^|\/)\.env|\.(test|spec|d)\.[cm]?[jt]sx?$|(?:secret|credential|private[-_]?key)/i;
@@ -37,21 +39,23 @@ export function scanSnapshot({tree, commit, branch, repository, read, limits = {
   const caps = {...LIMITS, ...limits}, start = performance.now();
   const checkTime = () => { if (performance.now()-start > caps.milliseconds) throw new Error('Scan time limit exceeded'); };
   if (tree.length > caps.files) throw new Error('Repository file count limit exceeded');
-  if (tree.reduce((n, x) => n + (x.size || 0), 0) > caps.bytes) throw new Error('Repository size limit exceeded');
-  const supported = tree.filter(x => x.mode === '100644' || x.mode === '100755').filter(x => extensions.includes(path.posix.extname(x.file)) && !excluded.test(x.file) && safeName(x.file));
-  if (!supported.length) throw new Error('No supported JavaScript/TypeScript source files');
+  const supported = tree.filter(x => x.mode === '100644' || x.mode === '100755').filter(x => [...extensions, '.py'].includes(path.posix.extname(x.file)) && !excluded.test(x.file) && safeName(x.file));
+  if (supported.reduce((n,x)=>n+(x.size||0),0)>caps.bytes)throw new Error('Supported source size limit exceeded');
+  if (!supported.length) throw new Error('No supported JavaScript/TypeScript or Python source files');
   if (supported.some(x => x.size > caps.fileBytes)) throw new Error('Source file size limit exceeded');
   const files = new Set(supported.map(x => x.file));
   const nodes = supported.map(x => ({ id: id(x.file), label: x.file, kind: 'source', certainty: 'detected', fingerprint: x.hash, explanation: 'A source file present in this commit.' }));
-  const edges = [];
+  const edges = [], sources = [];
   const occurrences = new Map();
   let unresolved = 0, dynamic = 0;
   const evidence = (file, source, node) => ({ repository, branch, commit, file, startLine: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1, endLine: source.getLineAndCharacterOfPosition(node.end - 1).line + 1 });
   for (const entry of supported) {
     checkTime();
     const text = read(entry);
+    if(entry.file.endsWith('.py')){const target=nodes.find(n=>n.id===id(entry.file));target.evidence={repository,branch,commit,file:entry.file,startLine:1,endLine:text.split('\n').length};continue;}
     const source = ts.createSourceFile(entry.file, text, ts.ScriptTarget.Latest, true);
     if (source.parseDiagnostics.length) throw new Error('A supported source file could not be parsed');
+    sources.push(source);
     const sourceNode = nodes.find(n => n.id === id(entry.file));
     sourceNode.evidence = { repository, branch, commit, file: entry.file, startLine: 1, endLine: source.getLineAndCharacterOfPosition(Math.max(0, text.length - 1)).line + 1 };
     const add = (literal, node, typeOnly = false) => {
@@ -93,13 +97,16 @@ export function scanSnapshot({tree, commit, branch, repository, read, limits = {
     };
     visit(source);
   }
+  const python=detectPython(supported.filter(e=>e.file.endsWith('.py')),read,{repository,branch,commit},caps.edges-edges.length);
+  nodes.push(...python.nodes);edges.push(...python.edges);
+  const relationships=detectRelationships(sources,{repository,branch,commit},caps.edges-edges.length,python.routes);nodes.push(...relationships.nodes);edges.push(...relationships.edges);
   for (const node of nodes.filter(n => n.kind === 'package-reference')) {
     node.fingerprint = id(edges.filter(e => e.target === node.id).map(e => `${e.id}:${e.fingerprint}`).sort().join('|'));
   }
   checkTime();
-  return { schemaVersion: 2, scannerVersion: VERSION, repository, branch, commit, scannedAt: new Date().toISOString(), nodes, edges,
+  return { schemaVersion: 2, scannerVersion: VERSION, repository, branch, commit, scannedAt: new Date().toISOString(), nodes: [...new Map(nodes.map(n=>[n.id,n])).values()], edges,
     coverage: { scannedFiles: supported.length, omittedFiles: tree.length - supported.length, unresolvedReferences: unresolved, omittedCalls: dynamic,
-      supported: 'Explicit ES module imports, re-exports and literal dynamic imports in committed JS/TS files; relative resolution only.',
-      gaps: ['Path aliases and CommonJS require are omitted.', 'No runtime, infrastructure, database, HTTP endpoint or business-impact discovery.', 'Tests, generated directories, secret-like paths and environment files are excluded.', 'Package references do not prove active integrations. No source snippets or environment values are retained.'] },
+      supported: 'JS/TS imports, resolved direct calls, Next/Express routes, literal fetch requests and direct Supabase/Prisma operations. Python imports, top-level functions, FastAPI verb routes and requests/httpx literal hosts.',
+      gaps: ['Path aliases, CommonJS require, Python relative imports and dynamic routing are omitted. Python call targets are inferred because names can be rebound.', 'Static HTTP, function and supported database patterns only; no runtime, infrastructure or business-impact discovery.', 'Tests, generated directories, secret-like paths and environment files are excluded.', 'Package references do not prove active integrations. No source snippets or environment values are retained.'] },
     usage: { elapsedMs: Math.round(performance.now() - start), repositoryBytes: tree.reduce((n, x) => n + (x.size || 0), 0), aiTokens: 0, aiCostUsd: 0 } };
 }

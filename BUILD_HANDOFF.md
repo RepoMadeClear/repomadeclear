@@ -257,3 +257,15 @@ User corrections must never become fabricated code evidence. Store internal scan
 Logo refinement — 2026-10-30: user supplied a precise mark reference. Header and hero now use a thin black outer diamond outline, a white gap, and a solid black inner diamond. Replaced the earlier thick nested mark.
 
 Local test bypass was removed at the user’s request on 2026-10-30. Normal managed-auth login remains required.
+
+
+## Local analysis/rescan milestone — 2026-11-09 (NOT deployed)
+- Scanner 0.3.0: JS/TS resolved direct named calls, Express/Next routes, inferred file-based API exports, literal fetch request/endpoint matches, direct Supabase/Prisma operations and external HTTP host references. Static findings, not runtime discovery.
+- Python syntax parser: simple absolute imports, top-level function calls (inferred), FastAPI verb decorators and requests/httpx literal hosts. No Python database analysis, relative imports, dynamic routing, or complete call graph. No scanned code executes.
+- Interactive workflow tour follows request → endpoint → handler/function → supported database/service edges, with inference labels and source lines.
+- Proposed hosted limits implemented locally: 200 source files, 20 MB supported source, 200 KB/file, 5,000 tree entries; images/docs excluded from source bytes. Existing network deadline, evidence and edge caps remain.
+- Synthetic 200-file/19.8 MB parser benchmark: 271 ms, 168 MB process RSS, ~231 KB JSON. Real current repo: 28 files, 204 nodes, 1,166 edges, 237 ms. Not production/download load testing. Reproduce with scripts/benchmark-scanner.mjs.
+- Migration 009 introduces bounded immutable history (100 prior snapshots/account), updated current map, annotation carry-forward and server-only transactional save RPC. Shares lock with scan completion; stale-map/version writes rejected. Branch is included in new cache keys. Legacy annotations copied only after backend verifies encrypted repository/branch identity.
+- Validation: 65 automated tests pass; npm run test:storage passes in local PostgreSQL-compatible PGlite for archive, annotations, stale saves, version conflicts, cache and user separation. Hosted build passes with public Supabase config.
+- REQUIRED BEFORE DEPLOY: apply migration 009 to dedicated Supabase project; verify legacy migration and concurrent live sessions; exercise GitHub download bounds and visually verify new workflow navigation. Do not deploy paid-map.js before its save RPC exists. Current production remains unchanged.
+- Changes saved in local canonical VS Code repository; not committed or pushed by this task.

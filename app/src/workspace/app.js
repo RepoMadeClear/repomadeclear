@@ -7,7 +7,7 @@ let data=model(projected());
 const $=id=>document.getElementById(id), svg=$('diagram'), ns='http://www.w3.org/2000/svg';
 let panelTab="overview",history=[],scope=null,selected=null,step=-1,playing=false,timer,scale=1,offset={x:0,y:0},bounds={w:1100,h:900};
 const palette=[['#f1f6ff','#a8bdeb','#456cb5'],['#f5f1ff','#c0afea','#805bb6'],['#edf9f7','#93c9bd','#378a7a'],['#fff8ef','#e4c491','#a27b3c'],['#f2f7fc','#b4c8df','#5d7b9f'],['#fff4f5','#e5b9bf','#a76976']];
-const order=['Browser experience','Hosted repository service','Shared connections','Local developer tools','Scanning & maps','Build tools','Other source','Your additions','Referenced libraries'];
+const order=['Frontend requests','API endpoints','Functions','Database operations','External services','Browser experience','Hosted repository service','Shared connections','Local developer tools','Scanning & maps','Build tools','Other source','Your additions','Referenced libraries'];
 let groups=data.groups.sort((a,b)=>order.indexOf(a.label)-order.indexOf(b.label));
 let byId=new Map(data.nodes.map(n=>[n.id,n]));
 const escapeText=(tag,text,className)=>{const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;};
@@ -16,12 +16,14 @@ function button(text,action){const b=escapeText('button',text);b.onclick=action;
 function activate(e,fn){e.setAttribute('tabindex','0');e.setAttribute('role','button');e.addEventListener('click',fn);e.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();fn();}});}
 const short=(text,max=34)=>text.length>max?text.slice(0,max-1)+'…':text;
 const sourceNodes=data.nodes.filter(n=>n.kind==='source');
-$('summary').textContent=`${sourceNodes.length} source files · ${groups.length} areas · ${data.edges.length} detected references. Explore what each part contributes.`;
+$('summary').textContent=`${sourceNodes.length} source files · ${groups.length} areas · ${data.edges.length} source relationships. Explore what each part contributes.`;
 $('snapshot').textContent=`Saved scan · ${data.commit.slice(0,10)}`;
-const tours=data.edges.filter(e=>e.evidence&&e.certainty==='detected'&&byId.get(e.source)?.kind==='source').sort((a,b)=>{
- const priority=['github.js','github-api.js','hosted-client.js','hosted-scan.js','cli.js','scanner.js'];
- const rank=e=>{const i=priority.indexOf(byId.get(e.source).label.split('/').pop());return i<0?99:i;};return rank(a)-rank(b);
-}).filter((e,i,all)=>all.findIndex(x=>x.source===e.source)===i).slice(0,8);
+const workflowKinds=new Set(['requests-http','may-request-endpoint','handled-by','calls-function','requests-service']);
+const tours=[],visited=new Set();
+function follow(id){if(visited.has(id))return;visited.add(id);for(const edge of data.edges.filter(e=>e.source===id&&(workflowKinds.has(e.kind)||e.kind.startsWith('database-')))){if(tours.length>=20)return;tours.push(edge);follow(edge.target);}}
+for(const request of data.nodes.filter(n=>n.kind==='http-request'))follow(request.id);
+if(!tours.length)for(const endpoint of data.nodes.filter(n=>n.kind==='api-endpoint'))follow(endpoint.id);
+if(!tours.length)tours.push(...data.edges.filter(e=>e.evidence).slice(0,8));
 function visible(){if(!scope)return data.nodes;return data.nodes.filter(n=>n.group===scope);}
 function draw(){
  svg.replaceChildren();const defs=el('defs');const marker=el('marker',{id:'arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto'});marker.append(el('path',{d:'M0 0 L10 5 L0 10z',fill:'#8d9bb0'}));defs.append(marker);svg.append(defs);
@@ -46,7 +48,7 @@ function draw(){
 }
 function updateView(){svg.setAttribute('viewBox',`${offset.x} ${offset.y} ${bounds.w/scale} ${bounds.h/scale}`);$('zoom-label').textContent=Math.round(scale*100)+'%';}
 function fit(){scale=1;offset={x:0,y:0};}
-function welcome(){const p=$('panel');p.replaceChildren(escapeText('div','◈','empty-symbol'),escapeText('h2','Start with the big picture'),escapeText('p','Each colored area groups related source files. A box is a part of the project. An arrow means one file directly references another file or library.'));p.append(escapeText('h3','Try it'),escapeText('p','Click a component for a plain-English explanation. Open its group to focus on the parts inside. Use the tour to follow one connection at a time.'),escapeText('h3','What this does not prove'),escapeText('p','Source references are not a live traffic map. The scanner does not establish deployment locations, execution order or business impact.'),escapeText('div','Component roles are suggestions based on names and structure. They are labeled separately from detected references.','basis'));}
+function welcome(){const p=$('panel');p.replaceChildren(escapeText('div','◈','empty-symbol'),escapeText('h2','Start with the big picture'),escapeText('p','Each colored area groups related source files. A box is a part of the project. Arrows show source relationships: requests, function calls, database operations or imports. Inferred matches are labeled.'));p.append(escapeText('h3','Try it'),escapeText('p','Click a component for a plain-English explanation. Open its group to focus on the parts inside. Use the tour to follow one connection at a time.'),escapeText('h3','What this does not prove'),escapeText('p','Source references are not a live traffic map. The scanner does not establish deployment locations, execution order or business impact.'),escapeText('div','Component roles are suggestions based on names and structure. They are labeled separately from detected references.','basis'));}
 function showGroup(g){const p=$('panel');p.replaceChildren(escapeText('span','GROUP','badge'),escapeText('h2',g.label),escapeText('p',`${g.nodes.length} components are grouped here to make the source easier to explore. Grouping is a presentation choice, not proof of a deployment boundary.`));for(const id of g.nodes)p.append(button(byId.get(id).title,()=>{openNode(byId.get(id));}));}
 function evidence(p,e){
  if(!e){p.append(escapeText('p','No source lines are attached to this human-supplied item.'));return;}
@@ -93,7 +95,7 @@ $('component-search').addEventListener('input',event=>{
  if(!matches.length)list.append(escapeText('p','No match. Try a file name or a shorter phrase.'));
 });
 function stop(){clearInterval(timer);playing=false;$('tour').hidden=step<0;$('tour-play').textContent='Play';}
-function tourStep(index){step=(index+tours.length)%tours.length;scope=null;selected=null;fit();draw();const edge=tours[step],a=byId.get(edge.source),b=byId.get(edge.target);$('tour').hidden=false;$('tour-count').textContent=`${step+1} / ${tours.length}`;$('tour-title').textContent=`${a.title} → ${b.title}`;$('tour-description').textContent=`${a.title} explicitly references ${b.title.toLowerCase()}. We found this in ${edge.evidence.file}, line ${edge.evidence.startLine}. This is a source relationship, not a recorded runtime event.`;showNode(a);}
+function tourStep(index){step=(index+tours.length)%tours.length;scope=null;selected=null;fit();draw();const edge=tours[step],a=byId.get(edge.source),b=byId.get(edge.target);$('tour').hidden=false;$('tour-count').textContent=`${step+1} / ${tours.length}`;$('tour-title').textContent=`${a.title} → ${b.title}`;$('tour-description').textContent=`${connectionDescription(edge,data.nodes).text} Evidence: ${edge.evidence.file}, line ${edge.evidence.startLine}. ${connectionDescription(edge,data.nodes).limit}`;showNode(a);}
 $('tour-start').onclick=()=>{if(!tours.length)return;tourStep(0);playing=true;$('tour-play').textContent='Pause';clearInterval(timer);timer=setInterval(()=>tourStep(step+1),9000);};
 $('tour-next').onclick=()=>{stop();tourStep(step+1);};$('tour-prev').onclick=()=>{stop();tourStep(step-1);};$('tour-close').onclick=()=>{step=-1;stop();selected=null;draw();welcome();};$('tour-play').onclick=()=>{if(playing)stop();else{playing=true;$('tour-play').textContent='Pause';timer=setInterval(()=>tourStep(step+1),9000);}};
 $('zoom-in').onclick=()=>{scale=Math.min(3,scale*1.25);updateView();};$('zoom-out').onclick=()=>{scale=Math.max(.5,scale/1.25);updateView();};$('fit').onclick=()=>{fit();updateView();};

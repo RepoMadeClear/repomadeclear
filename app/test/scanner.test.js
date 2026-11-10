@@ -33,7 +33,7 @@ test('file, byte, per-file, time and edge budgets fail closed', t => {
   for (const limits of [{ files: 0 }, { bytes: 1 }, { fileBytes: 1 }, { milliseconds: 0 }, { edges: 0 }]) assert.throws(() => scanRepository(root, { limits }));
 });
 test('unsupported repository is rejected', t => {
-  assert.throws(() => scanRepository(fixture(t, { 'main.py': 'print("hi")' })), /No supported/);
+  assert.throws(() => scanRepository(fixture(t, { 'main.rb': 'puts("hi")' })), /No supported/);
 });
 test('untrusted labels cannot inject HTML into the map', t => {
   const scan = scanRepository(fixture(t, { 'index.js': 'export const x=1;' }));

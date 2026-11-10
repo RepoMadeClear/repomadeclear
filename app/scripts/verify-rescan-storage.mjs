@@ -1,0 +1,18 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFileSync,readdirSync} from 'node:fs';import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`create role anon;create role authenticated;create role service_role;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;`);
+for(const prefix of ['002','005','006','007','008','009'])await db.exec(readFileSync(new URL('../migrations/',import.meta.url).pathname+readdirSync(new URL('../migrations/',import.meta.url)).find(f=>f.startsWith(prefix)),'utf8'));
+await db.exec('create table public.rmc_overlays(user_id uuid,scan_key text,envelope text,version integer,updated_at timestamptz);');
+const user='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222';
+await db.exec(`insert into auth.users values('${user}'),('${other}');set request.jwt.claim.sub='${user}';`);
+const rpc=async(action,key,repo='1',branch='main')=>(await db.query('select public.rmc_repository_scan($1,$2) as result',[action,{key,repository:repo,branch,envelope:'encrypted-'+key}])).rows[0].result;
+const a='a'.repeat(64),b='b'.repeat(64);assert.equal((await rpc('begin',a)).allowed,true);await rpc('finish',a);
+const save=async(key,version,note='my-note',uid=user)=>(await db.query('select public.rmc_save_repository_overlay($1,$2,$3,$4,$5,$6) as ok',[uid,'1','main',key,note,version])).rows[0].ok;
+assert.equal(await save(a,0),true);assert.equal((await rpc('begin',b)).allowed,true);await rpc('finish',b);
+assert.equal((await db.query('select envelope from rmc_scan_history')).rows[0].envelope,'encrypted-'+a);
+assert.equal((await db.query('select envelope from rmc_repository_overlays where scan_key=$1',[b])).rows[0].envelope,'my-note');
+assert.equal(await save(a,1),false);assert.equal(await save(b,0),false);assert.equal(await save(b,1),true);assert.equal(await save(b,2,'stolen',other),false);
+assert.equal((await rpc('begin',b)).envelope,'encrypted-'+b);
+await db.exec(`set request.jwt.claim.sub='${other}';`);assert.equal((await rpc('begin',b)).allowed,true);
+console.log('PASS: SQL rescan archive, edit preservation, stale saves, version conflict, cached scan, and user isolation');await db.close();
