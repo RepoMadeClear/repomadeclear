@@ -9,6 +9,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = (status,message) => { throw new HttpError(status,message); };
 const opaque = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
 function checkBilling(config,user){
+        if(config.freeAccess===true)return;
         if(config.billingMode==='live'){
           if(!/^(sk|rk)_live_/.test(config.stripeKey||'')||!config.stripeWebhookSecret||!config.stripePortal)fail(503,'Live payments are still being configured.');
         }else{
@@ -38,6 +39,7 @@ export function githubHandler(config, dependencies = {}) {
       const service=dependencies.service || providers({...config,origin,githubCallback:`${origin}/github/callback`});
       const user=await service.user(token);
       if(!user.id || !user.email_confirmed_at) fail(401,'Verify your email and sign in again.');
+      if(body.action==='checkout' && config.freeAccess===true)fail(409,'Repo Made Clear is currently free. No payment is required.');
       if(body.action==='portal'){checkBilling(config,user);const quota=dependencies.store?dependencies.store(user.id):githubStore(config,token);await quota('read');return json(200,await billing({...config,origin}).portal(user.id));}
       if(body.action==='status' && !ready) return json(200,{githubReady:false,githubConnected:false});
       if(!ready) fail(503,'GitHub connection is awaiting service setup.');
@@ -74,7 +76,7 @@ export function githubHandler(config, dependencies = {}) {
       try { connection=await vault.open(saved.envelope,user.id,'github'); }
       catch(error) { if(body.action==='status') return json(200,{githubReady:true,githubConnected:false}); throw error; }
       if(body.action==='status') return json(200,{githubReady:true,githubConnected:true});
-      if(body.action==='installations') return json(200,{installURL:`https://github.com/apps/${config.githubSlug}/installations/new`,installations:(await service.installations(connection.token)).map(i=>({id:i.id,account:i.account.login}))});
+      if(body.action==='installations') return json(200,{githubLogin:(await service.githubIdentity(connection.token)).login,installURL:`https://github.com/apps/${config.githubSlug}/installations/new`,installations:(await service.installations(connection.token)).map(i=>({id:i.id,account:i.account.login}))});
       if(!/^\d{1,20}$/.test(String(body.installation||''))) fail(400,'Choose an installation.');
       if(body.action==='repositories') return json(200,{repositories:(await service.repositories(connection.token,body.installation)).map(r=>({id:r.id,name:r.full_name,defaultBranch:r.default_branch}))});
       if(!/^\d{1,20}$/.test(String(body.repository||''))) fail(400,'Choose a repository.');

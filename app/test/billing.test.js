@@ -30,3 +30,19 @@ test('a second checkout cannot run while the account is locked',async()=>{
  const stripe={prices:{retrieve:async()=>({active:true,unit_amount:4900,currency:'usd',recurring:{interval:'month',interval_count:1},livemode:false})},checkout:{sessions:{create:async()=>{created=true;}}}};
  await assert.rejects(billing(config,{db,stripe}).checkout({id:'alice'},12),e=>e.status===409);assert.equal(created,false);
 });
+
+test('owner grant requires exact server-configured UUID; other accounts stay unpaid and owner cannot be charged',async()=>{
+ const owner='11111111-1111-4111-8111-111111111111';
+ const db={from:()=>({select:()=>({eq:()=>({eq:()=>({maybeSingle:async()=>({data:null})})})})})};
+ const service=billing({...config,ownerUserId:owner},{db,stripe:{}});
+ assert.deepEqual(await service.paid(owner,'12'),{paid:true,source:'owner'});
+ assert.deepEqual(await service.paid('22222222-2222-4222-8222-222222222222','12'),{paid:false});
+ await assert.rejects(service.checkout({id:owner},'12'),e=>e.status===409);
+ for(const ownerUserId of [undefined,'','alice'])assert.deepEqual(await billing({...config,ownerUserId},{db,stripe:{}}).paid(ownerUserId||owner,'12'),{paid:false});
+});
+test('free access needs no Stripe calls and prevents new checkout sessions',async()=>{
+ const service=billing({freeAccess:true,authServiceKey:'placeholder'},{db:{},stripe:{}});
+ assert.deepEqual(await service.paid('alice','12'),{paid:true,source:'free'});
+ assert.deepEqual(await service.paid('bob','99'),{paid:true,source:'free'});
+ await assert.rejects(service.checkout({id:'alice'},12),e=>e.status===409);
+});

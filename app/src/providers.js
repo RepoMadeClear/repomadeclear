@@ -28,12 +28,20 @@ export function providers(config, fetcher = fetch) {
     }
     throw new HttpError(422, 'This account exceeds the current repository listing limit.');
   }
+  async function githubIdentity(token) {
+    const user=await gh('/user',token);
+    if(!Number.isSafeInteger(user.id)||user.id<=0||typeof user.login!=='string')throw new HttpError(403,'Reconnect GitHub to verify your identity.');
+    return {id:user.id,login:user.login};
+  }
   async function installations(token) {
-    return (await pages('/user/installations', token, 'installations')).filter(i => String(i.app_id) === config.githubAppId && !i.suspended_at && i.repository_selection === 'selected' && i.permissions?.contents === 'read' && Object.entries(i.permissions).every(([name, level]) => ['contents', 'metadata'].includes(name) && level === 'read'));
+    const identity=await githubIdentity(token);
+    return (await pages('/user/installations', token, 'installations')).filter(i => String(i.app_id) === String(config.githubAppId) && (i.account?.type==='Organization' || (i.account?.type==='User' && i.account.id===identity.id)) && !i.suspended_at && ['selected','all'].includes(i.repository_selection) && i.permissions?.contents === 'read' && Object.entries(i.permissions).every(([name, level]) => ['contents', 'metadata'].includes(name) && level === 'read'));
   }
   async function repositories(token, installation) {
-    if (!(await installations(token)).some(i => String(i.id) === String(installation))) throw new HttpError(403, 'This GitHub installation is not accessible. Choose selected repositories when installing.');
-    return pages(`/user/installations/${installation}/repositories`, token, 'repositories');
+    const allowed=(await installations(token)).find(i => String(i.id) === String(installation));
+    if (!allowed) throw new HttpError(403, 'This GitHub installation is not accessible to your connected GitHub account.');
+    const repos=await pages(`/user/installations/${installation}/repositories`, token, 'repositories');
+    return repos.filter(repo=>repo.owner?.id===allowed.account.id && typeof repo.full_name==='string' && repo.full_name.split('/')[0].toLowerCase()===allowed.account.login.toLowerCase());
   }
   return {
     signup: (email, password) => auth('signup', { email, password }),
@@ -44,7 +52,7 @@ export function providers(config, fetcher = fetch) {
     password: (token, password) => auth('user', { password }, token, 'PUT'),
     logout: token => auth('logout', {}, token),
     exchange: (code, verifier) => request('https://github.com/login/oauth/access_token', { method: 'POST', body: { client_id: config.githubClientId, client_secret: config.githubSecret, code, code_verifier: verifier, redirect_uri: config.githubCallback || `${config.origin}/api/github/callback` } }),
-    installations, repositories,
+    githubIdentity, installations, repositories,
     githubRead: gh,
     async branches(token, installation, repository) {
       const repo = (await repositories(token, installation)).find(r => String(r.id) === String(repository));

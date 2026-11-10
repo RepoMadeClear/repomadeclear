@@ -10,6 +10,7 @@ function setup() {
  const service={
   user:async t=>({id:t===token?'user1':'user2',email_confirmed_at:'2026-01-01'}),
   exchange:async()=>{exchanges++; return {access_token:'github-token-never-public',expires_in:28800};},
+  githubIdentity:async()=>({id:10,login:'owner'}),
   installations:async()=>[{id:11,account:{login:'owner'}}],
   repositories:async()=>{if(revoked) throw new HttpError(403,'Repository access is unavailable.'); return [{id:22,full_name:'owner/repo',default_branch:'main'}];},
   branches:async()=>{if(revoked) throw new HttpError(403,'Repository access is unavailable.'); return [{name:'main',commit:{sha:'commit123'}}];}
@@ -67,4 +68,10 @@ test('repository selection rechecks access; disconnect clears persisted connecti
 test('shared request quota is enforced and storage failures are sanitized',async()=>{
  const store=githubStore(config,token,async()=>({ok:true,json:async()=>({limited:true})}));await assert.rejects(store('read'),error=>error.status===429);
  const broken=githubStore(config,token,async()=>({ok:false,status:500}));await assert.rejects(broken('read'),error=>error.status===503);
+});
+test('free mode still rejects missing auth, disconnected users, and checkout',async()=>{
+ const s=setup(),handler=githubHandler({...config,freeAccess:true},{service:s.service,store:()=>async()=>({})});
+ assert.equal((await call(handler,{action:'details'},{headers:{authorization:''}})).status,401);
+ assert.equal((await call(handler,{action:'details',installation:'11',repository:'22'})).status,403);
+ assert.equal((await call(handler,{action:'checkout'})).status,409);
 });

@@ -4,13 +4,17 @@ import {createClient} from '@supabase/supabase-js';
 import {HttpError} from './providers.js';
 const id = value => typeof value==='string'?value:value?.id;
 export function billing(config, dependencies={}) {
- if(!config.stripeKey||!config.stripePrice||!config.authServiceKey)throw new HttpError(503,'Payments are still being configured.');
- const stripe=dependencies.stripe||new Stripe(config.stripeKey,{timeout:10000,maxNetworkRetries:1});
+ if(!config.authServiceKey||(!config.freeAccess&&(!config.stripeKey||!config.stripePrice)))throw new HttpError(503,'Payments are still being configured.');
+ const stripe=dependencies.stripe||(config.stripeKey?new Stripe(config.stripeKey,{timeout:10000,maxNetworkRetries:1}):null);
  const db=dependencies.db||createClient(config.authURL,config.authServiceKey,{auth:{persistSession:false,autoRefreshToken:false}});
  const live=/^(sk|rk)_live_/.test(config.stripeKey);
  const mode=live?'live':'test';
+ // Server configuration only: caller identity must come from verified Supabase auth.
+ const isOwner=user=>typeof config.ownerUserId==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.ownerUserId) && user===config.ownerUserId;
  async function row(user){const {data,error}=await db.from('rmc_billing_accounts').select('*').eq('user_id',user).eq('mode',mode).maybeSingle();if(error)throw new HttpError(503,'Billing storage is unavailable.');return data;}
  async function paid(user,repository){
+  if(config.freeAccess===true && typeof user==='string' && user.length)return {paid:true,source:'free'};
+  if(isOwner(user))return {paid:true,source:'owner'};
   const account=await row(user);if(!account||account.repository!==String(repository))return {paid:false};
   const list=await stripe.subscriptions.list({customer:account.customer,status:'all',limit:100,expand:['data.latest_invoice']});
   if(list.has_more)throw new HttpError(503,'Billing account needs review.');
@@ -28,6 +32,8 @@ export function billing(config, dependencies={}) {
   return {paid:false};
  }
  async function checkout(user,repository,installation){
+  if(config.freeAccess===true)throw new HttpError(409,'Repo Made Clear is currently free. No payment is required.');
+  if(isOwner(user.id))throw new HttpError(409,'Your owner account already has full map access. Open the interactive map instead.');
   let account=await row(user.id);
   if(account&&account.repository!==String(repository))throw new HttpError(409,'This account is already linked to another repository for billing.');
   const price=await stripe.prices.retrieve(config.stripePrice);

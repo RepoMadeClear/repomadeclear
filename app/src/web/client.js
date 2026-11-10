@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
-let mode = 'login', config, session, verifiedSelection = false, scanning = false;
-function resetScan() { if($('billing-controls'))$('billing-controls').hidden=true; verifiedSelection=false; $('scan').disabled=true; $('scan-result').hidden=true; }
+let mode = 'login', config, session, verifiedSelection = false, scanning = false, readyScan = null, selectionVersion = 0;
+function resetScan() { selectionVersion++; readyScan=null; if($('billing-controls'))$('billing-controls').hidden=true; verifiedSelection=false; $('scan').disabled=true; $('scan-result').hidden=true; }
 
 const say = text => { $('notice').textContent = text; };
 async function api(route, data) {
@@ -30,12 +30,18 @@ function choices(element, rows, placeholder, value, label) {
 }
 async function installations() {
   resetScan();
+  choices($('installation'), [], 'Loading GitHub accounts…', i=>i.id, i=>i.account);
+  choices($('repository'), [], 'Choose a repository', r=>r.id, r=>r.name);
+  choices($('branch'), [], 'Choose a branch', b=>b.name, b=>b.name);
+  $('select').disabled=true;
+  $('github-identity').textContent='Checking your connected GitHub identity…';
   const data = await api('/api/github/installations');
   $('install').href = data.installURL;
+  $('github-identity').textContent = `Connected GitHub: ${data.githubLogin || 'identity unavailable'}. This connection is shared by anyone using this Repo Made Clear login.`;
   choices($('installation'), data.installations, 'Choose an installation', i => i.id, i => i.account);
   choices($('repository'), [], 'Choose a repository', r => r.id, r => r.name);
   choices($('branch'), [], 'Choose a branch', b => b.name, b => b.name); $('select').disabled = true;
-  if (!data.installations.length) say('Choose repositories on GitHub, then refresh access. Installations granting all repositories are not accepted in this preview.');
+  $('installation-help').textContent = data.installations.length ? 'Choose the GitHub account or organization containing your repository.' : 'No accessible installation found for your connected GitHub account. Use Choose repositories on GitHub, then Refresh GitHub access. If you installed under a different GitHub login, disconnect and reconnect using that login.';
 }
 async function refresh() {
   session = await api('/api/session');
@@ -83,18 +89,18 @@ $('installation').onchange = act(async () => {
   resetScan();
   choices($('repository'), [], 'Choose a repository', r => r.id, r => r.name); choices($('branch'), [], 'Choose a branch', b => b.name, b => b.name); $('select').disabled = true;
   if (!$('installation').value) return;
-  const data = await api('/api/github/repositories?installation=' + encodeURIComponent($('installation').value));
-  choices($('repository'), data.repositories, 'Choose a repository', r => r.id, r => r.name);
+  const version=selectionVersion;const data = await api('/api/github/repositories?installation=' + encodeURIComponent($('installation').value));
+  if(version!==selectionVersion)return; choices($('repository'), data.repositories, 'Choose a repository', r => r.id, r => r.name);
 });
 const selectionQuery = () => new URLSearchParams({ installation: $('installation').value, repository: $('repository').value });
 $('repository').onchange = act(async () => {
   resetScan();
   choices($('branch'), [], 'Choose a branch', b => b.name, b => b.name); $('select').disabled = true;
   if (!$('repository').value) return;
-  const data = await api('/api/github/branches?' + selectionQuery()); choices($('branch'), data.branches, 'Choose a branch', b => b.name, b => b.name); if (!data.branches.length) say('This repository has no branches yet. Push your first commit to GitHub, then choose it again.');
+  const version=selectionVersion;const data = await api('/api/github/branches?' + selectionQuery()); if(version!==selectionVersion)return; choices($('branch'), data.branches, 'Choose a branch', b => b.name, b => b.name); if (!data.branches.length) say('This repository has no branches yet. Push your first commit to GitHub, then choose it again.');
 });
 $('branch').onchange = () => { resetScan(); $('select').disabled = !$('branch').value; };
-$('select').onclick = act(async () => { const data = await api('/api/github/select?' + selectionQuery(), { branch: $('branch').value }); $('selection').textContent = data.message; verifiedSelection=true; $('billing-controls').hidden=false; $('scan').disabled=!$('scan-consent').checked; say('Repository and branch verified. Review the coverage and create your free overview.'); });
+$('select').onclick = act(async () => { const version=selectionVersion;const data = await api('/api/github/select?' + selectionQuery(), { branch: $('branch').value });if(version!==selectionVersion)return; $('selection').textContent = data.message; verifiedSelection=true; $('billing-controls').hidden=true; $('scan').disabled=!$('scan-consent').checked; say('Repository and branch verified. Review the coverage and create your free overview.'); });
 (async () => { try { config = await api('/api/config'); route(); await refresh(); say(globalThis.rmcAuthCallbackError || (session.recovery ? 'Email verified. Choose your new password.' : session.signedIn ? 'You are signed in.' : !config.authReady ? 'Account service setup is needed before you can register. No account has been created.' : !config.githubReady ? 'Email accounts are configured. GitHub service setup is still needed.' : 'Create an account or sign in to begin.')); if (config.emailLinks) document.querySelector('[data-mode="verify"]').hidden = true; } catch (error) { say(error.message); } })();
 
 window.addEventListener('rmc-auth-changed', act(refresh));
@@ -102,9 +108,12 @@ window.addEventListener('rmc-auth-changed', act(refresh));
 $('scan-consent').onchange=()=>{$('scan').disabled=scanning||!verifiedSelection||!$('scan-consent').checked;};
 $('scan').onclick=act(async()=>{
  if(scanning||!verifiedSelection||!$('scan-consent').checked)return;
- scanning=true; $('scan').disabled=true; $('scan').textContent='Scanning committed source…'; say('Reading supported source files. This may take up to a minute.');
+ const requestedVersion=selectionVersion, requestedQuery=selectionQuery().toString(),requestedBranch=$('branch').value;
+ scanning=true; readyScan=null; $('billing-controls').hidden=true; $('scan').disabled=true; $('scan').textContent='Scanning committed source…'; say('Reading supported source files. This may take up to a minute.');
  try {
-  const {overview:o,cached}=await api('/api/github/scan?'+selectionQuery(),{branch:$('branch').value,consent:true});
+  const {overview:o,cached,scanKey}=await api('/api/github/scan?'+requestedQuery,{branch:requestedBranch,consent:true});
+  if(requestedVersion!==selectionVersion)return;
+  readyScan={query:requestedQuery,scanKey};
   $('scan-meta').textContent=`${o.repository} · ${o.branch} · ${o.commit.slice(0,12)} · ${new Date(o.scannedAt).toLocaleString()}${cached?' · Saved scan':''}`;
   const root=$('real-map');root.replaceChildren();
   const ns='http://www.w3.org/2000/svg', svg=document.createElementNS(ns,'svg');
@@ -116,10 +125,10 @@ $('scan').onclick=act(async()=>{
   root.append(svg);
   const list=document.createElement('ul');for(const link of o.connections){const item=document.createElement('li');item.textContent=`${o.groups.find(g=>g.id===link.source).label} → ${o.groups.find(g=>g.id===link.target).label}: ${link.count} source references`;list.append(item);}root.append(list);
   $('scan-coverage').textContent=`${o.coverage.scannedFiles} files scanned; ${o.coverage.omittedFiles} omitted; ${o.coverage.unresolvedReferences} unresolved references; ${o.coverage.omittedCalls} calls omitted. Connections show source references, not execution order. `+o.coverage.gaps.join(' ');
-  $('scan-result').hidden=false; say(cached?'Saved overview loaded.':'Real repository scan complete.');$('scan-result').scrollIntoView({behavior:'smooth'});
+  $('scan-result').hidden=false; $('billing-controls').hidden=false; say(cached?'Saved overview loaded.':'Real repository scan complete.');$('scan-result').scrollIntoView({behavior:'smooth'});
  } finally {scanning=false;$('scan').textContent='Scan repository';$('scan').disabled=!verifiedSelection||!$('scan-consent').checked;}
 });
 
 $('checkout').onclick=act(async()=>{const result=await api('/api/github/checkout?'+selectionQuery(),{});location.assign(result.url);});
 $('manage-billing').onclick=act(async()=>{const result=await api('/api/github/portal?'+selectionQuery(),{});location.assign(result.url);});
-$('open-workspace').onclick=act(async()=>{const result=await api('/api/github/billing-status?'+selectionQuery(),{});if(!result.paid)throw new Error('No verified paid subscription for this repository yet.');location.assign('/workspace.html?'+selectionQuery());});
+$('open-workspace').onclick=act(async()=>{if(!readyScan)throw new Error('Scan the selected repository first.');const selected=readyScan;const result=await api('/api/github/billing-status?'+selected.query,{});if(readyScan!==selected)return;if(!result.paid)throw new Error('Interactive access is unavailable for this repository.');location.assign('/workspace.html?'+selected.query+'&scanKey='+encodeURIComponent(selected.scanKey));});

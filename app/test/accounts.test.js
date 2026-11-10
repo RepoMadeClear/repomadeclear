@@ -81,14 +81,36 @@ test('auth requests have a bounded rate limit and configuration does not expose 
   assert.equal((await f.request('/api/auth/recover',{method:'POST',data:{email:'x@example.com'}})).status,429);
   assert.throws(()=>configuration({APP_ORIGIN:'http://public.example'}));
 });
-test('GitHub provider filters unrelated, suspended and all-repository installations before repository access', async () => {
+test('GitHub provider accepts selected/all read-only installations and rejects unrelated, suspended or write access before repository access', async () => {
   let repositoryReads = 0;
   const fetcher = async url => {
-    if (url.includes('/user/installations?')) return new Response(JSON.stringify({installations:[{id:2,app_id:1,repository_selection:'selected',permissions:{contents:'read',metadata:'read'}},{id:4,app_id:99,repository_selection:'selected'},{id:5,app_id:1,repository_selection:'all'},{id:6,app_id:1,repository_selection:'selected',suspended_at:'now'}]}));
-    repositoryReads++; return new Response(JSON.stringify({repositories:[{id:3,full_name:'test/repo'}]}));
+    if (url.endsWith('/user')) return new Response(JSON.stringify({id:10,login:'test'}));
+    if (url.includes('/user/installations?')) return new Response(JSON.stringify({installations:[{id:2,app_id:1,account:{id:10,login:'test',type:'User'},repository_selection:'selected',permissions:{contents:'read',metadata:'read'}},{id:4,app_id:99,repository_selection:'selected'},{id:5,app_id:1,account:{id:10,login:'test',type:'User'},repository_selection:'all',permissions:{contents:'read',metadata:'read'}},{id:7,app_id:1,account:{id:10,login:'test',type:'User'},repository_selection:'all',permissions:{contents:'write',metadata:'read'}},{id:6,app_id:1,account:{id:10,login:'test',type:'User'},repository_selection:'selected',suspended_at:'now'}]}));
+    repositoryReads++; return new Response(JSON.stringify({repositories:[{id:3,full_name:'test/repo',owner:{id:10}}]}));
   };
   const service = providers(config,fetcher);
-  assert.deepEqual((await service.installations('token')).map(i=>i.id),[2]);
+  assert.deepEqual((await service.installations('token')).map(i=>i.id),[2,5]);
   await assert.rejects(service.repositories('token','4'),/not accessible/); assert.equal(repositoryReads,0);
+  await assert.rejects(service.repositories('token','7'),/not accessible/);
+  assert.equal((await service.repositories('token','5'))[0].id,3);
   assert.equal((await service.repositories('token','2'))[0].id,3);
+});
+test('personal installations are owner-only and forged IDs cannot reach repository endpoints',async()=>{
+ let identity=10;const reads=[];
+ const item=(id,owner,type='User')=>({id,app_id:1,account:{id:owner,login:owner===10?'alice':owner===20?'brickware-web':'team',type},repository_selection:'all',permissions:{contents:'read',metadata:'read'}});
+ const fetcher=async(url,options)=>{
+  assert.equal(options.headers.Authorization,'Bearer caller-token');
+  if(url.endsWith('/user'))return Response.json({id:identity,login:identity===10?'alice':'brickware-web'});
+  if(url.includes('/user/installations?'))return Response.json({installations:[item(1,10),item(2,20),item(3,30,'Organization')]});
+  reads.push(url);
+  return Response.json({repositories:[{id:101,full_name:'alice/own',owner:{id:10}},{id:102,full_name:'brickware-web/private',owner:{id:20}}]});
+ };
+ const service=providers(config,fetcher);
+ assert.deepEqual((await service.installations('caller-token')).map(i=>i.id),[1,3]);
+ await assert.rejects(service.repositories('caller-token','2'),e=>e.status===403);assert.equal(reads.length,0);
+ assert.deepEqual((await service.repositories('caller-token','1')).map(r=>r.id),[101]);
+ await assert.rejects(service.branches('caller-token','1','102'),e=>e.status===403);
+ identity=20;
+ assert.deepEqual((await service.installations('caller-token')).map(i=>i.id),[2,3]);
+ await assert.rejects(service.repositories('caller-token','1'),e=>e.status===403);
 });

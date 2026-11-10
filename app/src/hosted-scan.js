@@ -23,13 +23,14 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
   const commit=branch.commit.sha, vault=credentialVault(config.encryptionKey);
   const key=createHash('sha256').update(`${repo.id}:${commit}:${VERSION}`).digest('hex');
   const db=storage || (async(action,payload={})=>{
-    const response=await fetch(`${config.authURL}/rest/v1/rpc/rmc_scan`,{method:'POST',headers:{apikey:config.authKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({action,payload}),signal:AbortSignal.timeout(10000),redirect:'error'});
+    const response=await fetch(`${config.authURL}/rest/v1/rpc/rmc_repository_scan`,{method:'POST',headers:{apikey:config.authKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({action,payload}),signal:AbortSignal.timeout(10000),redirect:'error'});
     if(!response.ok) throw new HttpError(503,'Scan storage is unavailable. Try again later.');
     return response.json();
   });
-  const claim=await db('begin',{key});
-  if(claim.envelope) {const saved=await vault.open(claim.envelope,user,'scan');return {overview:overview(saved.scan),cached:true};}
-  if(!claim.allowed) throw new HttpError(429,claim.completed?'Your free overview is already saved. Changed-commit rescans will require a paid plan.':'Scan limit reached or a scan is running. Try again later.');
+  const scope={key,repository:String(repo.id),branch:branch.name};
+  const claim=await db('begin',scope);
+  if(claim.envelope) {const saved=await vault.open(claim.envelope,user,'scan');if(saved.scan.repository!==repo.full_name || saved.scan.commit!==commit)throw new HttpError(403,'Saved scan does not match this repository.');return {overview:{...overview(saved.scan),branch:branch.name},scanKey:key,cached:true};}
+  if(!claim.allowed) throw new HttpError(429,scanLimitMessage(claim));
   try {
     const deadline=Date.now()+40000;
     const route=`/repos/${repo.full_name.split('/').map(encodeURIComponent).join('/')}`;
@@ -45,7 +46,16 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
     try {scan=scanSnapshot({tree,commit,branch:branch.name,repository:repo.full_name,read:e=>content.get(e.hash),limits:{files:500,bytes:5000000,fileBytes:200000,milliseconds:8000,edges:2000}});}catch {throw new HttpError(422,'This repository exceeds supported scan limits or contains unsupported source syntax.');}
     const envelope=await vault.seal({scan},user,'scan',315360000);
     if(envelope.length>1500000)throw new HttpError(422,'Scan evidence exceeds the preview storage limit.');
-    await db('finish',{key,envelope});
-    return {overview:overview(scan),cached:false};
-  } finally {await db('release',{key});}
+    await db('finish',{...scope,envelope});
+    return {overview:overview(scan),scanKey:key,cached:false};
+  } finally {await db('release',scope);}
+}
+
+export function scanLimitMessage(claim){
+ const retry=claim.retryAt&&Number.isFinite(Date.parse(claim.retryAt))?new Date(claim.retryAt).toUTCString():null;
+ if(claim.completed)return 'This repository and branch already have a saved map from an earlier commit. Scanning changed code is not available yet.';
+ if(claim.reason==='running')return `Another scan is already running for your account. Wait for it to finish${retry?`, or retry after ${retry}`:''}. This request did not use another attempt.`;
+ if(claim.reason==='daily_limit')return `Daily scan limit reached: 5 of 5 attempts used. Failed scans count too.${retry?` You can scan again after ${retry}.`:' The allowance resets at midnight UTC.'} Saved unchanged scans can still be reopened.`;
+ if(claim.reason==='map_limit')return 'Saved-map limit reached: 10 of 10 repository/branch maps saved. You can reopen existing maps. Waiting until tomorrow will not reset this limit.';
+ return 'Scanning is temporarily unavailable. We could not identify the limit; please try again later.';
 }
