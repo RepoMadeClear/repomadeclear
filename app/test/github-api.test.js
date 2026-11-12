@@ -57,7 +57,12 @@ test('encrypted credentials cannot be moved across users, changed, used for anot
  await assert.rejects(vault.open(value,'user2','github'));
  await assert.rejects(vault.open(value+'x','user1','github'));
  await assert.rejects(vault.open(value,'user1','oauth'));
- await assert.rejects(vault.open(await vault.seal({token:'old'},'user1','github',-10),'user1','github'));
+ const otherVault=credentialVault('cd'.repeat(32));
+ const unreadableScan=await otherVault.seal({token:'saved'},'user1','scan',60);
+ await assert.rejects(vault.open(unreadableScan,'user1','scan'),error=>error.status===503&&/Saved scan data could not be decrypted/.test(error.message));
+ const unreadableToken=await otherVault.seal({token:'saved'},'user1','github',60);
+ await assert.rejects(vault.open(unreadableToken,'user1','github'),error=>error.status===403&&error.message==='Saved GitHub token could not be decrypted or validated. Connect GitHub again.');
+ await assert.rejects(vault.open(await vault.seal({token:'old'},'user1','github',-10),'user1','github'),error=>error.status===403&&error.message==='GitHub connection expired. Connect again.');
 });
 test('repository selection rechecks access; disconnect clears persisted connection',async()=>{
  const s=setup();assert.equal((await connect(s)).done.status,200);

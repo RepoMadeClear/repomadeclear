@@ -1,6 +1,6 @@
 # Repo Made Clear — accounts, GitHub connection, and local scanner
 
-Local development only. The existing Site is untouched. This includes extraction and the first human-editing workflow, not the hosted product. No accounts, GitHub credentials, payment service or paid infrastructure are needed.
+Local development only. The existing Site is untouched. The local customer app supports managed sign-in, read-only GitHub access, bounded scans, and an interactive map when configured with an isolated development Supabase project. Local interactive access is free; no Stripe checkout or payment is used. Hosted payment policy is unchanged.
 
 ## Architecture overview
 
@@ -20,7 +20,7 @@ flowchart LR
     HostedScan --> Overview["Grouped overview<br/>returned to browser"]
     Overview --> Browser
     Auth -. "credentials and sessions" .-> Browser
-    Disabled["Not enabled yet:<br/>paid details and editing"]
+    Disabled["Paid workspace actions<br/>require hosted entitlement"]
   end
 
   subgraph Local["Local developer workflows"]
@@ -33,9 +33,11 @@ flowchart LR
     Editor --> Overlay["overlays.js"]
     Overlay --> EditFile["Separate edits JSON"]
 
-    Start["npm start"] --> LocalServer["server.js<br/>local account and GitHub shell"]
+    Start["npm start"] -->     LocalServer["server.js<br/>local account, GitHub and workspace routes"]
     LocalServer --> Providers["providers.js"]
     Providers --> Services["Supabase Auth / GitHub API"]
+    LocalServer --> Workspace["Authenticated interactive workspace"]
+    Workspace --> MapStore["User-scoped map RPC"]
   end
 ```
 
@@ -43,9 +45,11 @@ The hosted app and local developer tools are separate. The hosted scanner reuses
 
 ## Customer account and GitHub entry flow
 
-Run `npm start` and open http://localhost:4174. This new customer shell is separate from the offline developer editor. It implements the managed-auth and GitHub App adapters, but live registration and authorization need configuration. See [ACCOUNTS_SETUP.md](ACCOUNTS_SETUP.md). Without configuration it reports setup is needed; it does not create demo accounts or pretend a scan ran.
+Run `npm start` and open http://localhost:4174. This customer shell is separate from the offline developer editor. Local Supabase authentication and scanning require an explicitly configured development project; the local server fails closed against the known production project. With isolated Supabase, GitHub App, and encryption-key configuration, it supports managed sign-in, read-only repository selection, and a bounded scan through the same `scanner.js` and `hosted-scan.js` used by the hosted API. The endpoint rechecks repository access and the selected branch, stores encrypted per-user findings through the scan RPC, and returns only a grouped overview. Scan quotas, unchanged-scan caching, scan history, and overlay preservation depend on the configured Supabase project having the repository-scan migrations applied.
 
-Both component details and editing require payment, reconfirmed by the user. No billing or hosted customer scan is enabled yet. Twenty tests now pass, including seven new account/GitHub boundary tests. Local browser rendering and auth-view switching were verified; external email/OAuth flows remain unverified until setup.
+On localhost only, an isolated development Supabase project enables free interactive maps. Map reads and edits require the signed-in user, revalidated GitHub repository access, and a saved scan owned by that user. Apply migrations 001–010 only to the isolated development project; migration 010 adds authenticated, user-scoped map reads and edits. It is not applied automatically and must never be applied to production as part of this local workflow. Stripe remains disabled locally, and the hosted paid-access policy is unchanged. See [ACCOUNTS_SETUP.md](ACCOUNTS_SETUP.md). Without required configuration it reports setup is needed; it does not create demo accounts or pretend a scan ran.
+
+The hosted app keeps its paid entitlement requirement. Only the isolated localhost preview is free. No Stripe checkout, test payment or real charge is used by localhost. Automated tests cover the local map route, saved-scan ownership, GitHub revocation and storage isolation; external email/OAuth flows remain unverified until setup.
 
 ## Open in VS Code
 
@@ -94,4 +98,4 @@ Actual source verification: five supported application files and twelve referenc
 
 Browser visual/interaction QA is outstanding: the browser tool's URL policy blocked opening the local HTML file. Automated model and generated-script tests passed, but do not substitute for an end-to-end browser check. Check note saving, drag/keyboard movement, file save/load, reload persistence, connection corrections, and review actions in a browser before considering the local editing milestone fully accepted.
 
-Next: perform browser QA and validate extraction with an authorized representative repository containing code. The three-repository/owner review gate remains outstanding. Add route/integration patterns only with evidence tests. Early scan caching, frequency enforcement, accounts, GitHub App access, tenant isolation, server-side paid entitlements and webhook replay handling remain later work. No deployment is authorized or implied by this local artifact.
+Next: perform browser QA and validate extraction with authorized representative repositories containing code. The three-repository/owner review gate remains outstanding. Add route/integration patterns only with evidence tests. Paid entitlement enforcement and webhook replay handling remain separate work. No deployment is authorized or implied by this local artifact.

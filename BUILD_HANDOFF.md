@@ -1,3 +1,31 @@
+## Local interactive map 404 repair — November 11, 2026
+
+The localhost UI and backend were out of sync: the button called `/api/github/billing-status`, while `src/server.js` had no billing-status handler, workspace assets, or map-detail/edit route. The user chose free interactive access for isolated localhost only; this does not change the hosted paid-access policy. The local UI now hides Stripe checkout and describes free local access. No Stripe request or charge is made.
+
+Added authenticated local billing-status and workspace routes, each rechecking the signed-in Supabase identity and current GitHub repository access. Saved scan and overlay reads/edits use the user's Supabase token with `auth.uid()`-scoped RPC rather than table access or service-role credentials. Migration 010 adds that RPC; it must be applied only to the isolated development Supabase project after migrations 001–009. It has not been applied to any Supabase project. Production, deployment, and Stripe configuration were not touched.
+
+Verification: 79 automated tests pass; local PGlite scan/history/overlay and cross-user isolation tests pass; hosted bundle build passes with the hosted paid policy intact. The updated localhost config reports free local access only while the project isolation guard is satisfied. Unauthenticated billing-status requests return 401; workspace HTML and modules are served. This task did not apply migration 010 to Supabase; a real user's saved scan was not opened against the configured project, and the authenticated browser session was reset during server restart.
+
+## Local Supabase isolation and snapshot diagnostics — November 11, 2026
+
+An earlier local `app/.env` diagnostic pointed to a Supabase project identified elsewhere in this handoff as production. The user-reported decrypt error is from the saved-scan path, not GitHub token decryption: localhost keeps the GitHub token in its process session, then `runHostedScan` reads a legacy `rmc_scans.envelope` before it may read a per-repository `rmc_repository_scans.envelope`. The old error did not identify which envelope failed. The recent key change makes a key mismatch plausible, but without a safe read of the record the exact row and failure cause are unverified.
+
+Local configuration now requires `RMC_DEVELOPMENT_SUPABASE_PROJECT_REF` to match a non-production `SUPABASE_URL` project reference before Supabase authentication or scanning is enabled. Saved-scan decryption errors identify the envelope table without exposing its contents; GitHub-token and scan-snapshot failures remain distinct. The environment file and all database records and keys were left untouched. No Supabase RPC or production resource was accessed or changed.
+
+Use a separately provisioned development Supabase project for local authentication and scanning, apply migrations 001–010 only there, configure the GitHub App's local callback, and generate a separate stable development encryption key. The updated localhost `/api/config` now reports the isolated-project guard satisfied; this check does not read or modify saved scan records. Automated tests: 76 passing before the workspace changes; local PGlite scan-storage tests pass. No deployment, push, or commit.
+
+## Local authenticated scan integration — November 11, 2026
+
+Connected `localhost:4174` `POST /api/github/scan` to the existing bounded `hosted-scan.js` / `scanner.js` implementation. The local route requires the existing authenticated session and exact selected installation/repository/branch, revalidates GitHub access, and uses the signed-in Supabase token with `rmc_repository_scan` for account-scoped quotas, encrypted immutable findings, caching, scan history, and overlay preservation. Local GitHub installation responses now include the GitHub login expected by the UI.
+
+## Local scan error attribution repair — November 11, 2026
+
+The exact “GitHub connection expired” response came from `credentialVault.open()`, which was shared by GitHub-token reads and saved scan reads. In the localhost scan route, GitHub repository and branch authorization use the same in-memory session token as repository selection; after those checks, the scanner opens a legacy encrypted scan envelope before downloading source. Any decryption failure there—including an encryption-key mismatch—was incorrectly reported as GitHub expiry. The actual saved-envelope failure cause cannot be distinguished without reading/decrypting the configured store, so a key mismatch is a likely explanation, not a proven fact.
+
+The vault now reports expiry only for an actually expired encrypted GitHub credential. Unreadable scan data gets an actionable storage/key message, while user/context claim failures remain access-denied responses. Regression coverage includes mismatched scan encryption, truly expired GitHub credentials, unauthorized repository access, and successful authorized mock scans; `npm test`: 73 passing.
+
+No deployment or production code change was made. At the time of this earlier check, `localhost:4174/api/config` reported services ready, but the local `.env` targeted the Supabase project documented as production. Its scan RPC can change quota/lease state, so no live scan or scan-store RPC was attempted. Thus, real localhost authentication, repository download, and architecture generation remain unverified. Use an isolated development project and key for live local scan verification; do not copy the production key into development.
+
 ## Ten daily attempts — 2026-11-09
 
 User approved 10 daily scan attempts. Migration 008 applied and verified. Existing counts retained; the separate 10 saved-map cap is unchanged. Messages and terms updated. Targeted scan tests: 5 pass. Deployment dpl_5YmkS46wihjtFMVpUCcaxGKs8k4M READY on www.repomadeclear.com; live ten-attempt terms verified.

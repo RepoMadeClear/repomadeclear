@@ -24,6 +24,14 @@ export function overview(scan) {
   return {repository:scan.repository,branch:scan.branch,commit:scan.commit,scannedAt:scan.scannedAt,groups:[...groups.values()],connections:[...links.values()],coverage:scan.coverage};
 }
 
+async function openSnapshot(vault,envelope,user,record){
+  try{return await vault.open(envelope,user,'scan');}
+  catch(error){
+    if(error instanceof HttpError&&error.status===503)throw new HttpError(503,`${record} could not be decrypted. The local encryption key may not match the key used to save it. Reconnecting GitHub will not resolve this; use the original key only with its original store, or configure an isolated development Supabase project and key.`);
+    throw error;
+  }
+}
+
 export async function runHostedScan({config,token,user,service,githubToken,body,storage}) {
   if(body.consent!==true) throw new HttpError(400,'Review the coverage and free preview limits before scanning.');
   const repo=(await service.repositories(githubToken,body.installation)).find(r=>String(r.id)===String(body.repository));
@@ -39,10 +47,10 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
   });
   const scope={key,repository:String(repo.id),branch:branch.name};
   const legacy=await db('legacy',scope);
-  if(legacy.envelope){const previous=await vault.open(legacy.envelope,user,'scan');if(previous.scan.repository===repo.full_name&&previous.scan.branch===branch.name)scope.legacyKey=legacy.key;}
+  if(legacy.envelope){const previous=await openSnapshot(vault,legacy.envelope,user,'Legacy scan snapshot in rmc_scans.envelope');if(previous.scan.repository===repo.full_name&&previous.scan.branch===branch.name)scope.legacyKey=legacy.key;}
   const claim=await db('begin',scope);
   if(claim.envelope) {
-    const saved=await vault.open(claim.envelope,user,'scan');
+    const saved=await openSnapshot(vault,claim.envelope,user,'Saved repository scan snapshot in rmc_repository_scans.envelope');
     if(saved.scan.repository!==repo.full_name || saved.scan.commit!==commit || saved.scan.branch!==branch.name)throw new HttpError(403,'Saved scan does not match this repository.');
     return {overview:{...overview(saved.scan),branch:branch.name},scanKey:key,cached:true};
   }

@@ -72,6 +72,24 @@ function route() {
 document.querySelectorAll('[data-mode]').forEach(button => { button.onclick = () => { location.hash = button.dataset.mode; route(); }; });
 window.addEventListener('hashchange', route);
 route();
+function configureAccessMode() {
+  if (!config.freeAccess) return;
+  $('manage-billing').hidden = true;
+  $('billing-controls').querySelector('h3').textContent = 'Your interactive map';
+  $('billing-controls').querySelector('p:not(#billing-status)').textContent = 'Interactive explanations, source evidence, saved edits and SVG export are currently free in this isolated local preview. Existing scan-size and daily scan limits still apply.';
+  $('checkout').hidden = true;
+  const terms = $('scan-terms').querySelectorAll('p');
+  terms[2].textContent = 'Interactive explanations, evidence, editing and export are free in this isolated local preview. Scan limits still apply.';
+  $('scan-result').querySelectorAll(':scope > p')[2].textContent = 'Interactive explanations, evidence and editing are free in this isolated local preview.';
+  const pricing = document.querySelector('#pricing');
+  if (pricing) {
+    pricing.querySelector('h2').textContent = 'Free in local preview.';
+    pricing.querySelectorAll('.feature-grid article')[1].querySelector('h3').textContent = 'Interactive map';
+    pricing.querySelectorAll('.feature-grid article')[1].querySelector('p').textContent = 'Explanations, source evidence, editing and export are free in this isolated local preview.';
+    pricing.querySelector('.muted').textContent = 'No Stripe checkout or payment is used locally. Scan limits still apply.';
+    document.querySelector('#how-it-works .feature-grid article:last-child p').textContent = 'Explore explanations and evidence, edit your map, and rescan with your human context preserved.';
+  }
+}
 $('auth-form').onsubmit = act(async () => {
   const data = { email: $('email').value, ...(mode === 'signup' || mode === 'login' ? { password: $('password').value } : {}), ...(mode === 'verify' ? { code: $('code').value, type: $('code-type').value } : {}) };
   try {
@@ -101,7 +119,7 @@ $('repository').onchange = act(async () => {
 });
 $('branch').onchange = () => { resetScan(); $('select').disabled = !$('branch').value; };
 $('select').onclick = act(async () => { const version=selectionVersion;const data = await api('/api/github/select?' + selectionQuery(), { branch: $('branch').value });if(version!==selectionVersion)return; $('selection').textContent = data.message; verifiedSelection=true; $('billing-controls').hidden=true; $('scan').disabled=!$('scan-consent').checked; say('Repository and branch verified. Review the coverage and create your free overview.'); });
-(async () => { try { config = await api('/api/config'); route(); await refresh(); say(globalThis.rmcAuthCallbackError || (session.recovery ? 'Email verified. Choose your new password.' : session.signedIn ? 'You are signed in.' : !config.authReady ? 'Account service setup is needed before you can register. No account has been created.' : !config.githubReady ? 'Email accounts are configured. GitHub service setup is still needed.' : 'Create an account or sign in to begin.')); if (config.emailLinks) document.querySelector('[data-mode="verify"]').hidden = true; } catch (error) { say(error.message); } })();
+(async () => { try { config = await api('/api/config'); configureAccessMode(); route(); await refresh(); say(globalThis.rmcAuthCallbackError || (session.recovery ? 'Email verified. Choose your new password.' : session.signedIn ? 'You are signed in.' : !config.authReady ? 'Account service setup is needed before you can register. No account has been created.' : !config.githubReady ? 'Email accounts are configured. GitHub service setup is still needed.' : 'Create an account or sign in to begin.')); if (config.emailLinks) document.querySelector('[data-mode="verify"]').hidden = true; } catch (error) { say(error.message); } })();
 
 window.addEventListener('rmc-auth-changed', act(refresh));
 
@@ -131,4 +149,4 @@ $('scan').onclick=act(async()=>{
 
 $('checkout').onclick=act(async()=>{const result=await api('/api/github/checkout?'+selectionQuery(),{});location.assign(result.url);});
 $('manage-billing').onclick=act(async()=>{const result=await api('/api/github/portal?'+selectionQuery(),{});location.assign(result.url);});
-$('open-workspace').onclick=act(async()=>{if(!readyScan)throw new Error('Scan the selected repository first.');const selected=readyScan;const result=await api('/api/github/billing-status?'+selected.query,{});if(readyScan!==selected)return;if(!result.paid)throw new Error('Interactive access is unavailable for this repository.');location.assign('/workspace.html?'+selected.query+'&scanKey='+encodeURIComponent(selected.scanKey));});
+$('open-workspace').onclick=act(async()=>{if(!readyScan)throw new Error('Scan the selected repository first.');const selected=readyScan;const result=await api('/api/github/billing-status?'+selected.query);if(readyScan!==selected)return;if(!result.paid)throw new Error('Interactive access is unavailable for this repository.');location.assign('/workspace.html?'+selected.query+'&scanKey='+encodeURIComponent(selected.scanKey));});
