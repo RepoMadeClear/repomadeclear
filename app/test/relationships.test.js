@@ -14,3 +14,8 @@ test('resolves imported function binding and avoids mismatched or ambiguous endp
  const result=scan({'a.ts':"import {run as execute} from './b'; execute(); fetch('/api/users',{method:'DELETE'});",'b.ts':'export function run(){}','app/api/users/route.ts':'export function GET(){}'});
  assert.equal(result.edges.filter(e=>e.kind==='calls-function').length,1);assert.ok(!result.edges.some(e=>e.kind==='may-request-endpoint'));
 });
+test('matches mounted route prefixes and strips query strings before endpoint matching',()=>{
+ const result=scan({'server.ts':"import express from 'express'; const app=express(); const router=express.Router(); app.use('/api', router); router.get('/users/:id', load); function load(){};",'ui.ts':"fetch('/api/users/42?active=1');"});
+ assert.ok(result.nodes.some(n=>n.kind==='api-endpoint'&&n.label==='GET /api/users/:id'));
+ assert.ok(result.edges.some(e=>e.kind==='may-request-endpoint'));
+});

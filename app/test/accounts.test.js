@@ -163,6 +163,9 @@ test('local free workspace opens only the caller-owned saved scan and rechecks G
   assert.equal((await f.request('/api/github/billing-status?installation=2&repository=3', { cookie })).data.source, 'free');
   assert.equal((await f.request('/workspace.html')).status, 200);
   assert.equal((await f.request('/workspace.js')).status, 200);
+  const navigationModule = await f.request('/workspace/navigation.js');
+  assert.equal(navigationModule.status, 200);
+  assert.match(navigationModule.text, /installWheelNavigation/);
   const map = await f.request('/api/github', { method: 'POST', cookie, data: { action: 'details', installation: '2', repository: '3', scanKey: scanned.data.scanKey } });
   assert.equal(map.status, 200, map.text);
   assert.equal(map.data.scan.repository, 'test/repo');

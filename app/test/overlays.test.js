@@ -37,6 +37,8 @@ test('line shifts preserve connection identity, context and layout without stale
   assert.equal(after.edges[0].evidence.startLine, 3);
   assert.equal(engine.conflicts(after, state).length, 0);
   assert.deepEqual(engine.project(after, state).positions, state.positions);
+  const reloaded = engine.validate(JSON.parse(JSON.stringify(state)), after);
+  assert.deepEqual(engine.project(after, reloaded).positions, state.positions);
   assert.equal(JSON.stringify(before), original);
   assert.equal(JSON.stringify(state), saved);
 });

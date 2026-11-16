@@ -112,6 +112,24 @@ test(
   }
 );
 
+test('direct browser API evidence is line-bound and shadowed names are not treated as globals', t => {
+  const root = fixture(t, {
+    'client.js':
+      '// document.querySelector is only a comment\n' +
+      'const root = document.getElementById("root");\n' +
+      'const label = "window.location";\n',
+    'server.js':
+      'function read(document) { return document.settings; }\n' +
+      'function locate(window) { return window.location; }\n',
+  });
+  const scan = scanRepository(root);
+  const client = scan.nodes.find(node => node.label === 'client.js');
+  const server = scan.nodes.find(node => node.label === 'server.js');
+  assert.deepEqual(client.browserEvidence, [{api: 'document', file: 'client.js', startLine: 2, endLine: 2}]);
+  assert.deepEqual(server.browserEvidence, []);
+  assert.match(scan.coverage.supported, /direct browser API references/);
+});
+
 test(
   'file, byte, per-file, time and edge budgets fail closed',
   t => {

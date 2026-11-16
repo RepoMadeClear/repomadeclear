@@ -15,6 +15,7 @@ The authenticated workspace is the best starting point for redesigning the curre
 | `src/workspace/index.html` | Workspace shell: toolbar, zoom controls, search, SVG canvas, explanation panel, tour controls and footer. | Lines 1–7 |
 | `src/workspace/style.css` | Primary workspace styling, including the SVG map, responsive layout, focus, selection, evidence and connection states. It is currently one physical CSS line. | Line 1 |
 | `src/workspace/app.js` | Primary renderer and browser interactions: SVG node/group/edge creation, layout, selection, evidence, search, tour, zoom/pan, moving components, edit forms and SVG export. | Lines 1–116 |
+| `src/workspace/navigation.js` | Shared SVG viewBox navigation math: wheel-delta normalization, screen-to-viewBox conversion, cursor-centered zoom, zoom limits, fit, and canvas wheel handling. | Lines 1–117 |
 | `src/workspace/model.js` | Projects scan data into display nodes/groups and describes evidence-backed connections; validates GitHub evidence URLs. | Lines 1–51 |
 | `src/local-workspace-client.js` | Local browser bridge: reads query parameters, calls `/api/github`, and loads the shared workspace renderer. | Lines 1–35 |
 | `src/workspace-entry.js` | Hosted browser bridge: uses the managed Supabase session to request map details/edits, then loads the same renderer. | Lines 1–11 |
@@ -59,89 +60,91 @@ The renderer’s core uses SVG namespace helpers (`el`) and a keyboard/click act
 
 ```js
 const palette = [
-  ['#f1f6ff','#a8bdeb','#456cb5'],
-  ['#f5f1ff','#c0afea','#805bb6'],
-  ['#edf9f7','#93c9bd','#378a7a'],
-  ['#fff8ef','#e4c491','#a27b3c'],
-  ['#f2f7fc','#b4c8df','#5d7b9f'],
-  ['#fff4f5','#e5b9bf','#a76976']
+  ['#f1f5fb','#cbd7e8','#49627f'],
+  ['#f5f1fa','#d8cbe8','#745b91'],
+  ['#eef7f4','#c3ddd3','#477b6b'],
+  ['#fbf5eb','#e4d3b3','#896b3c'],
+  ['#f0f5f9','#cfdae4','#58738c'],
+  ['#faf0f1','#e5ccd0','#95676f']
 ];
 ```
 
-In the **overview**, groups are arranged in rows of three. Each group background is an SVG rounded rectangle; its nodes are placed in a vertical list within the card. Group-card width is 326 SVG units, the columns start at x=24 with 350-unit spacing, nodes are 294×54, and list rows are spaced 66 units apart. The `Referenced libraries` group is collapsed to a single aggregate node. In **group drilldown**, nodes are placed three across at 325-unit horizontal and 110-unit vertical intervals; the focused group background spans a 976×(height−40) SVG rectangle. Positions and group colors are set in `draw()` (`src/workspace/app.js:30–38`).
+The **overview** classifies components from supported source evidence and relationship types. Direct JS/TS references to browser globals, declared HTTP endpoints, and supported database operations can suggest Frontend or Backend areas; requests and imports alone do not prove execution. Top-level `apps/` and `packages/` roots remain visible as monorepo areas. Dependencies, external integrations, build/development source, and human additions stay in supporting areas. Uncertain components remain in the visible Unclassified area and are arranged with the graph rather than assumed to be tools; every component also remains searchable. Each area card is the group itself, with one muted component count and a short description. Selecting an area emphasizes its direct links; **Explore area** opens its drilldown. Layout is deterministic and graph-aware; cycles share a layer, disconnected groups remain visible, and supporting areas are placed apart. Position is a reading aid, not execution order. Each ordered area pair gets one rounded SVG route with no inline count; the inspector shows its members, certainty composition, explanation, and evidence. In **group drilldown**, component cards are 316×64 SVG units, placed three across at 350-unit horizontal and 112-unit vertical intervals. Saved positions expand the containing group and SVG bounds so **Fit view** includes moved components. Overview classification, aggregation, layout, and routing are in `src/workspace/model.js` and `src/workspace/overview-routing.js`; rendering is in `src/workspace/app.js`.
 
-Each component card is an SVG `<g class="node">` containing a rounded `<rect class="node-box">`, an icon, a title and a subtitle. The title is shortened to 34 characters; the subtitle uses the final path segment and is shortened to 40 characters. A selected node receives `selected`; nodes unrelated to the selected node/current tour step receive `dim` (`src/workspace/app.js:17,37,46`).
+Each overview area card is an SVG `<g class="node">` containing the area name, a short description, one muted component count, and a narrow accent. Drilldown component cards contain an icon, title, and shortened source path. A selected node receives `selected`; unrelated nodes and edges receive `dim`. **Show all links** clears selection emphasis; **Relayout** recalculates deterministic positions without changing saved manual positions.
 
-Edges are SVG paths routed with horizontal/vertical segments. When endpoints are separated horizontally by more than 100 units, the path routes through a midpoint; otherwise it routes through a lane to the right of both endpoints. Duplicate visible paths for the same endpoint pair are suppressed. A `<marker id="arrow">` supplies the arrowhead. Each visible edge also gets a wider transparent `.edge-hit` path so it is easier to click (`src/workspace/app.js:29,39–45`).
+Overview edges are SVG paths routed between visible card boundaries with rounded orthogonal corners. Relationships aggregate only by ordered source/target area pair; original edge objects, IDs, certainty, type, and evidence remain available in the inspector. Mixed-provenance arrows use a neutral style, and homogeneous arrows use the detected, inferred, or human-supplied color and pattern. Counts are shown in the inspector, not on routes. In group drilldown, source edges retain fan-offset cubic Bézier routes; duplicate paths are suppressed only when endpoints and certainty match. Wide transparent `.edge-hit` paths keep arrows easy to select. Exported SVG includes the overview routes without count badges (`src/workspace/overview-routing.js`, `src/workspace/app.js`).
 
 The graph uses the DOM/SVG rather than a graph-drawing library. The SVG `viewBox`, generated coordinates, CSS classes and attributes are the visual/rendering controls.
 
 ## Styling architecture and selector inventory
 
-### Primary workspace CSS (`src/workspace/style.css:1`)
+### Primary workspace CSS (`src/workspace/style.css`)
 
-All rules are currently on one physical line. This table lists the stylesheet’s selectors and their present declarations, grouped by role. Later rules in the file override earlier equal-specificity rules.
+The stylesheet is formatted as readable CSS. This table lists its selectors and current declarations, grouped by role.
 
 | Selector(s) | Current declarations / effect |
 |---|---|
-| `:root` | `font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; text `#202936`; page background `#f6f7f9`; `font-synthesis:none`. |
+| `:root` | `font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; text `#202936`; page background `#f3f5f8`; `font-synthesis:none`. |
 | `*` | `box-sizing:border-box`. |
 | `body` | `margin:0`. |
-| `button` | Inherits font/color; pointer cursor; white background; `1px solid #dce1e9`; 7px radius; `8px 12px` padding; 12px type. `button:hover`: `#f1f4fa`. `button:disabled`: opacity `.4`, default cursor. |
+| `button` | Inherits font/color; pointer cursor; white background; `1px solid #d5dce6`; 8px radius; `8px 12px` padding; 12px type. `button:hover`: `#f2f5fa`. `button:disabled`: opacity `.4`, default cursor. |
 | `button:focus-visible, [role=button]:focus-visible` | 3px `#527bf6` outline with 3px offset. |
 | `[hidden]` | `display:none!important`. |
-| `header` | 68px tall, white flex row, centered/space-between, `0 28px` padding, bottom border `#e2e6ed`. |
-| `.brand` | Flex, centered, 12px gap, 18px type. `.brand .badge` is hidden at `max-width:700px`. |
+| `header` | 66px tall, white flex row, centered/space-between, `0 32px` padding, bottom border `#e1e6ed`. |
+| `.brand` | Flex, centered, 12px gap, 17px type. `.brand .badge` is hidden at `max-width:700px`. |
 | `.badge` | 10px, `.07em` tracking, `#eef1f6` background, `#5b6680` text, `5px 7px` padding, 5px radius. |
 | `.header-note` | 12px, `#7b8595`; hidden at `max-width:1000px`. |
-| `main` | 20px padding; reduced to 12px at `max-width:1000px`. |
-| `.workspace` | White, border `#dce1e8`, 14px radius, clipped overflow, `0 4px 20px #17264104` shadow. |
-| `.toolbar` | Flex, spaced/aligned, bottom border `#edf0f4`, `22px 26px` padding; at max 700px becomes block with 18px padding. |
-| `.toolbar button` | At max 700px, `margin-top:12px`. |
+| `main` | Centered with 1680px max-width; 22px/28px desktop padding, reduced at narrower widths. |
+| `.workspace` | White, border `#dce2ea`, 16px radius, clipped overflow, subtle shadow. |
+| `.toolbar` | Flex, spaced/aligned with wrapping actions, bottom border `#e8ecf1`, `22px 28px` padding; at max 700px becomes block with 18px padding. |
 | `.eyebrow` | 10px, `.16em` tracking, weight 700, `#8891a1`. |
 | `h1` | 24px, `-.7px` tracking, `7px 0 6px` margin; at max 700px, 21px. |
 | `p` | 13px, line-height 1.65, `#667186`, no margin. |
 | `.primary` / `.primary:hover` | Dark `#202936` background/border with white text; hover `#36445b`. |
-| `.canvas-head` | Flex row, centered, space-between, 12px type, `12px 24px` padding, bottom border `#edf0f4`. |
-| `.controls` / `.controls button` | Flex with 8px gap; buttons use `5px 10px` padding. |
-| `.layout` | Initially declares `grid-template-columns:minmax(0,1fr) 315px`; later declares `minmax(0,1fr) 370px`, which is the effective desktop value. At max 1000px a 270px rule appears earlier and is likewise overridden by the later 370px rule. At max 900px it becomes `display:block`. |
-| `#viewport` | Relative, clipped, `touch-action:none`; dotted `radial-gradient(#e5e9f0 .65px, transparent .65px)` at 18px intervals. Initial height `calc(100vh - 300px)`, min-height 520px. At max 700px an earlier 550px height is declared. A later, more-specific `.layout #viewport` rule sets `height:calc(100vh - 340px); min-height:560px`, so that later size wins. |
+| `.canvas-head` | Flex row, centered, space-between, 12px type, 9px/22px padding, bottom border `#e8ecf1`. |
+| `.controls` / `.controls button` | Flex with 7px gap; buttons use `5px 10px` padding. |
+| `.layout` | Desktop grid: `minmax(0,1fr) 350px`; 320px panel at max 1100px; stacks at max 900px. |
+| `#viewport` | Relative, clipped, `touch-action:none`; 20px pale dotted grid, grab cursor. Desktop height `min(70vh,780px)`, min-height 560px; tablet/mobile uses 620px/520px heights. |
 | `#diagram` | Block, width and height 100%. |
-| `.canvas-hint` | Absolute bottom overlay; translucent white `#ffffffdf`, `#818b9b`, 10px text, 7px padding, 5px radius, centered, `pointer-events:none`. |
-| `aside` | Left border `#e6eaf0`, 24px padding, scrollable; max-height `calc(100vh - 300px)`, min-height 520px. Later `.layout aside` sets height/max-height to `calc(100vh - 340px)`; max-width 900px changes height to auto and removes max-height. |
-| `aside h2` / `aside h3` | H2 20px, line-height 1.3, margin `12px 0`; H3 11px uppercase, `.09em` tracking, `#7b8595`, margin `24px 0 8px`. |
-| `aside .path` | 11px/1.7 monospace, wraps long paths, `#778298` on `#f5f7fa`, 9px padding, 6px radius. |
-| `aside .basis` | 10px, `#8d6a30` on `#fffaed`, border `#f4e9cb`, 8px padding, 6px radius. |
+| `.canvas-hint` | Bottom-center overlay; translucent white with subtle border/shadow, muted 10px text, 7px/11px padding, `pointer-events:none`. |
+| `aside` | Left border `#e3e8ef`, 22px/24px padding, scrollable; desktop height `min(70vh,780px)`, min-height 560px; stacks below map at max 900px. |
+| `aside h2` / `aside h3` | H2 20px, line-height 1.3, margin `12px 0`; H3 10px uppercase, `.1em` tracking, `#768398`, margin `22px 0 8px`. |
+| `aside .path` | 11px/1.7 monospace, wraps long paths, `#778298` on `#f5f7fa`, 9px padding, 7px radius. |
+| `aside .basis` | 10px, `#82612d` on `#fff9eb`, border `#f0e2bf`, 8px/10px padding, 7px radius. |
 | `aside button` | Block, full width, left aligned, `8px 0` margin. |
-| `aside .evidence` | Left border 2px `#a7b9f0`, `8px 10px` padding, `#f7f9ff`, monospace 11px/1.7, wraps paths. |
-| `.empty-symbol` | 40px, `#b3becf`, `18px 0` margin. |
-| `.legend` / `.legend span` | Flex/wrap with 7px gap, top margin 18px; chips use `5px 8px`, 4px radius, 10px, `#f2f5fa`/`#65738c`. |
-| `.group-box` | SVG group container outline: 1px, dashed `5 4`. Fill and border color are inline SVG attributes from the `palette` in `app.js`. |
-| `.group-label` | SVG 600-weight 12px sans-serif; text color comes from an inline SVG `fill` using the third palette color. |
-| `.node-box` | White SVG fill, `#d6dce7` stroke, 1px. |
-| `.node-title`, `.node-subtitle`, `.node-icon` | Title 500-weight 11px sans-serif/`#354158`; subtitle 9px/`#929bad`; icon 12px sans-serif. Icon additionally gets inline fill `#7d8cab`. |
-| `.node` | Pointer cursor. `.node:hover .node-box`: `#6081dc`, 1.7px. `.node.selected .node-box`: `#4068df`, 2px, `#f5f8ff` fill. |
-| `.edge` | No fill, `#a3afc2` 1.2px stroke. |
-| `.edge.active` | `#4573e9`, 2.5px, dash `7 4`; the earlier `animation:flow` is later overridden to `animation:none` in the same file. |
-| `.edge[data-certainty='human-supplied']` | Human edge uses `#b18449` and dash `5 4` unless a later active-edge rule overrides those stroke values. |
-| `.edge-hit`, `.edge-hit:hover` | Transparent 12px SVG stroke, stroke-only pointer events, pointer cursor; hover stroke `#527bf630`. |
-| `.dim` | Opacity `.13`. `.node,.edge` transition opacity over `.2s`. |
-| `.explorer` / `.explorer input` | Flex search row with 14px gap and `12px 24px` padding; input `10px 12px`, min-width 280px, `#ccd5e2` border, 7px radius. At max 900px wraps; input becomes full width with no minimum. |
-| `#search-results` / `#search-results button` | Positioned dropdown (top 56px, left 24px, z-index 5), white, 1px `#d5dce8`, 10px radius, `0 12px 35px #24385720` shadow, 320px max-height, scrollable, 650px max-width, 10px padding. Buttons block/full-width/left aligned with 5px vertical margin. |
-| `.panel-tabs` / `.panel-tabs button` / `[aria-pressed=true]` | Wrapping flex tabs, 4px gap and `18px 0` margin; tab buttons auto width, zero margin, `7px 9px`, 11px. Pressed tab uses `#edf3ff`, `#6487df` border, `#254b9d` text. |
-| `.plain-explanation` | 15px, line-height 1.8, `#344256`. |
-| `.connection-card` and its `button:first-child` / `button:last-child` | Card: 1px `#e1e7ef`, 9px radius, `8px 12px`, `10px 0` margin. First button weight 600; last has no border, `#365fae`, 11px. |
-| `.evidence a` / `.evidence strong` | Link block with 8px top margin and `#3059a8`; `strong` block. `aside .evidence` supplies the evidence block styling above. |
+| `aside .evidence` | Left border 2px `#91a9d8`, `8px 10px` padding, `#f6f8fc`, monospace 11px/1.7, wraps paths. |
+| `.empty-symbol` | 36px, `#a9b5c7`, `12px 0` margin. |
+| `.legend` / `.legend span` | Flex/wrap; four line samples distinguish detected, inferred, human-supplied, and mixed connections. |
+| `.group-box` | SVG group container: solid 1.2px border, 14px corners, softly tinted fill. Fill/border come from inline SVG attributes. |
+| `.group-label` | SVG 650-weight 13px sans-serif; used for the real parent group in drilldown. |
+| `.node-box` | White SVG fill, `#cbd4e0` 1.1px stroke, 10px corners and subtle shadow. |
+| `.node-title`, `.node-subtitle`, `.node-icon` | Title 550-weight 14px sans-serif/`#2e3b4e`; subtitle 11px/`#7d899b`; icon 13px sans-serif. |
+| `.node` | Pointer cursor. `.node:hover .node-box`: `#6381bd`, 1.8px. `.node.selected .node-box`: `#436bb0`, 2px, `#f3f7ff` fill. |
+| `.edge[data-certainty='detected']` | Solid `#69819b` 1.4px stroke, `.58` opacity until focused. |
+| `.edge[data-certainty='inferred']` | Dotted `#bd812f` 1.4px stroke. |
+| `.edge[data-certainty='human-supplied']` | Dashed `#956bb1` 1.6px stroke. |
+| `.edge[data-certainty='mixed']` | Solid neutral `#52627a`; opens to individual relationships. |
+| `.edge.active` | Keeps its provenance color/pattern, increases to 2.2px, and uses full opacity. |
+| `.edge-hit`, `.edge-hit:hover` | Transparent 14px SVG stroke, stroke-only pointer events, pointer cursor; hover stroke `#527bf626`. |
+| `.node-count` | Muted component count, shown once on each overview card. Relationship totals stay in the details panel. |
+| `.dim` | Opacity `.24`. `.node,.edge` transition opacity over `.2s`. |
+| `.explorer` / `.explorer input` | Flex search row with 12px gap and `9px 22px` padding; input 9px/12px, width up to 390px, `#ccd5e2` border, 8px radius. At max 900px wraps and input becomes full width. |
+| `#search-results` / `#search-results button` | Positioned dropdown (top 50px, left 185px, z-index 5), white, 1px `#d5dce8`, 10px radius, `0 12px 35px #24385720` shadow, 320px max-height, scrollable, 650px max-width, 10px padding. Buttons block/full-width/left aligned with 4px vertical margin. |
+| `.panel-tabs` / `.panel-tabs button` / `[aria-pressed=true]` | Wrapping flex tabs, 5px gap and `18px 0` margin; tab buttons auto width, zero margin, `7px 9px`, 11px. Pressed tab uses `#edf3ff`, `#9eb4df` border, `#254b85` text. |
+| `.plain-explanation` | 14px, line-height 1.75, `#344256`. |
+| `.connection-card`, `.connection-heading`, `.certainty-badge` | Card: 1px `#e1e7ef`, 9px radius, `8px 12px`, `10px 0` margin. Overview relationship details show source/target, a provenance badge, explanation, and evidence. |
+| `.evidence a` / `.evidence strong` | Link inline-block with 6px top margin and `#3059a8`; `strong` block. `aside .evidence` supplies the evidence block styling above. |
 | `aside details` / `aside summary` | Details margin 14px vertical; summary pointer cursor, 12px. |
-| `footer` / `.dot` | Footer flex/wrap, spaced, 20px gap, 10px/`#8992a2`, `12px 24px` padding and top border `#edf0f4`. Dot is 6px `#667ca6`, circular, 5px right margin. |
+| `footer` / `.legend` | Footer flex/wrap, spaced, 18px gap, 10px/`#8992a2`, `13px 22px` padding and top border `#e8ecf1`. The legend has line samples for each provenance and mixed-evidence arrows. |
 | `#tour`, `#tour p`, `#tour strong`, `.tour-controls`, `.tour-controls button` | Dark `#202938` flex panel with white text, `16px 24px`, 24px gap; paragraph `#bbc6d7`, max-width 750px, 12px; strong 14px; controls flex/6px gap; buttons `#344156` with `#4c5970` border and white text. At max 700px tour becomes block and controls get 14px top margin. |
-| `@keyframes flow` / `@media(prefers-reduced-motion:reduce)` | Keyframe moves dash offset to −22; reduced motion disables active-edge animation. A later unconditional `.edge.active{animation:none}` also disables it in current styling. |
-| `@media(max-width:1000px)` | 270px layout rule (overridden later), header padding `0 18px`, hide header note, main padding 12px. |
-| `@media(max-width:700px)` | Block layout; aside top border and min-height 220px; block toolbar; viewport 550px (overridden by later height/min-height rule); hide brand badge; block tour; reduce footer gap to 8px; h1 to 21px. |
-| `aside label`, `aside input, aside textarea, aside select`, `aside textarea` | Form labels block/12px; inputs block/full width, 9px padding, `#ccd4df` border, 5px radius, 7px top margin; textarea min-height 120px. |
-| `#viewport, aside` (later `.layout #viewport, aside`) | Later rule: height `calc(100vh - 340px)`, min-height 560px; aside max-height also `calc(100vh - 340px)`. |
-| `@media(max-width:900px)` | Block layout; aside auto height and no max-height; explorer wraps; search input full-width; human-edge style and evidence wrapping remain in force. |
-| `.evidence` | `white-space:normal`. |
+| `@media(prefers-reduced-motion:reduce)` | Reduces transition duration for all elements. |
+| `@media(max-width:1100px)` | 320px inspector, header padding `0 18px`, hide header note, reduce main padding, align toolbar content to the top. |
+| `@media(max-width:900px)` | Block map/panel layout; 620px viewport; aside auto-height; search row wraps and input fills available width. |
+| `@media(max-width:700px)` | Hide brand badge; stack toolbar/tour; 520px viewport; h1 to 21px; reduce footer spacing. |
+| `aside label`, `aside input, aside textarea, aside select`, `aside textarea` | Form labels block/12px; inputs block/full width, 9px padding, `#ccd4df` border, 6px radius, 7px top margin; textarea min-height 120px. |
+| `#viewport, aside` | Desktop height `min(70vh,780px)`, min-height 560px. |
+| `@media(max-width:900px)` | Aside moves below the map; explorer wraps; search input fills available width. |
 
 `src/workspace/style.css` and `dev/diagram-preview/style.css` are not byte-identical. The current preview script copies the workspace stylesheet, not the legacy preview stylesheet.
 
@@ -150,10 +153,10 @@ All rules are currently on one physical line. This table lists the stylesheet’
 CSS is not the only appearance source:
 
 - `draw()` writes the group rectangle’s `fill` and `stroke` and the group label’s `fill` from the palette; these SVG presentation attributes are in `src/workspace/app.js:9,35`.
-- The arrowhead’s `<path>` gets the inline `fill:#8d9bb0` at `app.js:29`.
-- Node icon SVG text gets inline `fill:#7d8cab`; the SVG `rect` / `text` elements get classes and coordinates at `app.js:46`.
-- `class` strings are built at runtime: `.edge`, `.edge.active`, `.edge.dim`, `.node`, `.node.selected`, `.node.dim`, `.group-box`, `.group-label`, `.node-box`, `.node-icon`, `.node-title`, `.node-subtitle`, and `.edge-hit` (`app.js:35,44,46`).
-- SVG export clones the current canvas and inserts its own `<style>` with a reduced set of node, title, subtitle, group-label and edge rules; it does not copy the full workspace stylesheet (`app.js:114`).
+- Arrowhead paths get inline fills from the detected, inferred, human-supplied, or mixed-provenance colors in `app.js`.
+- Node icon SVG text gets inline `fill:#7588a3`; the SVG `rect` / `text` elements get classes and coordinates at `app.js:46`.
+- `class` strings are built at runtime: `.edge`, `.edge.active`, `.edge.dim`, `.node`, `.node.selected`, `.node.dim`, `.group-box`, `.group-label`, `.node-box`, `.node-icon`, `.node-title`, `.node-subtitle`, `.node-count`, and `.edge-hit`.
+- SVG export clones the current canvas and inserts its own `<style>` for group containers, cards, labels, and all four edge certainty styles; it does not copy the full workspace stylesheet.
 - The account-page static overview is created in `web/client.js` with SVG presentation attributes for group boxes, labels and counts; `.map-node`, `.map-link`, and `#real-map` styles are in `web/style.css:3,5`.
 
 ## Interaction, selection and evidence
@@ -169,10 +172,11 @@ CSS is not the only appearance source:
 
 ### Grouping, zoom, panning and component movement
 
-- The display model groups nodes by inferred/detected role; `order` controls the desired group sequence (`model.js:1–17`, `app.js:10–12`).
+- The display model groups nodes from explicit scan evidence, relationship types, and top-level app/package structure. Group reasons are presented for review; unsupported roles stay Unclassified. `scanner.js` now records line-bound direct browser-global references for JS/TS; it still does not detect CLI entry points, scheduler configuration, or library export surfaces.
 - Overview and drilldown coordinates are calculated afresh inside `draw()`; saved overlay positions are then applied to those positions (`app.js:27–38`).
-- Zoom buttons clamp scale to 0.5×–3× and multiply/divide by 1.25. `updateView()` changes the SVG `viewBox` dimensions and updates the percentage label. **Fit view** resets scale and offset (`app.js:49–50,101`).
-- Dragging empty canvas uses SVG pointer capture and updates the viewBox offset while moving. The viewport disables browser touch gestures with CSS `touch-action:none` (`app.js:102`, `style.css:1`).
+- Zoom buttons clamp scale to 0.5×–3× and multiply/divide by 1.25. `updateView()` changes the SVG `viewBox` dimensions and updates the percentage label. **Fit view** resets scale and offset; saved positions expand SVG bounds so moved components remain included (`app.js:49–50,101`).
+- Two-finger wheel scrolling pans in both axes; Ctrl+wheel (including browser trackpad pinch events) and Cmd+wheel zoom continuously around the pointer. Delta modes are normalized, and screen pixels are converted using the SVG's actual aspect-preserving scale (`navigation.js`).
+- Dragging empty canvas uses SVG pointer capture and updates the viewBox offset while moving. The viewport disables browser touch gestures with CSS `touch-action:none` (`app.js:102`, `style.css`).
 - Node movement is different from canvas panning: `beginMove()` records pointer-down and pointer-up positions, and saves a changed position when total movement is at least 8 pixels. The current handler does not redraw a live drag preview; the position updates after release (`app.js:46,116`).
 
 ## Editing and persistence
@@ -193,13 +197,13 @@ The separate CLI editor persists edits in browser `localStorage`, scoped by repo
 
 For the primary authenticated workspace:
 
-1. **Color, typography, borders, hover/selected states, panel dimensions and responsive breakpoints:** edit `src/workspace/style.css:1`. It is minified to one physical line; preserve cascade order or format it deliberately before substantial edits.
-2. **Group background palette and grid geometry:** edit `palette` and `draw()` in `src/workspace/app.js:9,28–38`.
-3. **Node card contents, SVG dimensions, labels, edge routing and arrow marker:** edit `draw()` in `app.js:28–48`.
+1. **Color, typography, borders, hover/selected states, panel dimensions and responsive breakpoints:** edit `src/workspace/style.css`.
+2. **Group classification, evidence rationale, and overview layout:** edit `src/workspace/model.js` and `layoutOverviewGroups()` in `src/workspace/overview-routing.js`.
+3. **Node card contents, SVG dimensions, labels, edge routing and arrow marker:** edit `draw()` in `app.js`.
 4. **Selection/search/tour/pan/zoom behavior:** edit `app.js:49–103`.
-5. **Appearance of evidence, explanation cards, tabs and edit forms:** edit `showNode`, `showConnection`, `evidence` and `editForm` in `app.js:53–90,109–113`, then their selectors in `style.css:1`.
-6. **SVG export appearance:** adjust the embedded export style in `app.js:114` as well as the live CSS if the downloaded SVG should match.
+5. **Appearance of evidence, explanation cards, tabs and edit forms:** edit `showNode`, `showConnection`, `evidence` and `editForm` in `app.js:53–90,109–113`, then their selectors in `style.css`.
+6. **SVG export appearance:** adjust the embedded export style in `app.js` as well as the live CSS if the downloaded SVG should match.
 7. **Static overview only:** change `web/client.js:105–137` and `web/style.css:3,5`.
 8. **Offline CLI editor only:** change `src/map.css:1`, its markup in `src/map.js:13–21`, and SVG/editor behavior in `src/editor-client.js:28–84`.
 
-Keep the semantic/provenance model in `workspace/model.js` and `overlays.js` separate from visual styling unless changing what a node or edge means.
+Keep immutable scanner findings, human overlays, and presentation grouping separate. The current overlay schema supports component explanations and positions, but not editable area names or grouping; adding those requires a versioned overlay/schema and server validation change. Do not write presentation classification back into scanner findings.

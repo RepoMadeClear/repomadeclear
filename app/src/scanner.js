@@ -7,9 +7,10 @@ import { detectJava } from './java-relationships.js';
 import { detectRelationships } from './relationships.js';
 import { isSupportedSource, languageFor, ANALYZED_LANGUAGES } from './supported-languages.js';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 export const LIMITS = Object.freeze({ files: 2000, bytes: 20_000_000, fileBytes: 500_000, milliseconds: 15000, edges: 10000 });
 const jsExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+const browserGlobals = new Set(['document', 'window', 'navigator', 'localStorage', 'sessionStorage']);
 export const excluded = /(^|\/)(node_modules|vendor|dist|build|\.next|\.git|coverage|test|tests|__tests__|fixtures)(\/|$)|(^|\/)\.env|\.(test|spec|d)\.[cm]?[jt]sx?$|(?:secret|credential|private[-_]?key)/i;
 export const safeName = s => /^[\w@./+ -]+$/.test(s) && !s.includes('..');
 const id = s => createHash('sha256').update(s).digest('hex').slice(0, 24);
@@ -56,9 +57,24 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
     if (typeof text !== 'string') throw Error(`Missing source contents: ${entry.file}`);
     const sourceNode = nodes.find(n => n.id === id(entry.file));
     sourceNode.evidence = { repository, branch, commit, file: entry.file, startLine: 1, endLine: text.split('\n').length };
+    sourceNode.browserEvidence = [];
     if (!jsExtensions.includes(path.posix.extname(entry.file))) continue;
     const source = ts.createSourceFile(entry.file, text, ts.ScriptTarget.Latest, true);
     if (source.parseDiagnostics.length) throw Error(`Could not parse supported JS/TS file: ${entry.file}`);
+    const shadowedBrowserGlobals = new Set();
+    const collectBindings = node => {
+      if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node)
+        || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+        || ts.isImportClause(node) || ts.isImportSpecifier(node) || ts.isImportEqualsDeclaration(node)) && node.name) {
+        const collectName = name => {
+          if (ts.isIdentifier(name)) shadowedBrowserGlobals.add(name.text);
+          else ts.forEachChild(name, collectName);
+        };
+        collectName(node.name);
+      }
+      ts.forEachChild(node, collectBindings);
+    };
+    collectBindings(source);
     sources.push(source);
     const add = (literal, node, typeOnly = false) => {
       const spec = literal.text;
@@ -88,6 +104,19 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
         evidence: evidence(entry.file, source, node) });
     };
     const visit = node => {
+      if (ts.isPropertyAccessExpression(node)
+        && ts.isIdentifier(node.expression)
+        && browserGlobals.has(node.expression.text)
+        && !shadowedBrowserGlobals.has(node.expression.text)
+        && sourceNode.browserEvidence.length < 20) {
+        const evidenceNode = node.expression;
+        sourceNode.browserEvidence.push({
+          api: evidenceNode.text,
+          file: entry.file,
+          startLine: source.getLineAndCharacterOfPosition(evidenceNode.getStart(source)).line + 1,
+          endLine: source.getLineAndCharacterOfPosition(evidenceNode.end - 1).line + 1,
+        });
+      }
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
         const clause = node.importClause, bindings = clause?.namedBindings;
         const typeOnly = node.isTypeOnly || clause?.isTypeOnly || (bindings && ts.isNamedImports(bindings) && bindings.elements.length > 0 && bindings.elements.every(x => x.isTypeOnly) && !clause.name);
@@ -117,7 +146,7 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
     coverage: { scannedFiles: supported.length, omittedFiles: tree.length - supported.length, unresolvedReferences: unresolved, omittedCalls: dynamic,
       analyzedFiles: supported.length - indexedOnly.length, indexedOnlyFiles: indexedOnly.length,
       indexedOnlyLanguages: [...new Set(indexedOnly.map(e => languageFor(e.file)))],
-      supported: 'JS/TS imports, calls, routes and selected integrations; Python imports, functions, routes and HTTP hosts; Java imports, some method declarations and literal Spring annotations.',
+      supported: 'JS/TS imports, calls, routes, direct browser API references and selected integrations; Python imports, functions, routes and HTTP hosts; Java imports, some method declarations and literal Spring annotations.',
       gaps: ['C, C++, C#, SQL, Go, Rust, PHP, Kotlin, Swift, Ruby and R are indexed only; no relationships are extracted for these languages.',
         'Java patterns are conservative and not a full Java grammar; Java method calls and database integrations are not detected.',
         'Static source evidence only; no runtime, infrastructure or business-impact discovery.',

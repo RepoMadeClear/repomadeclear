@@ -2,14 +2,48 @@ import ts from 'typescript';
 import {createHash} from 'node:crypto';
 const id=s=>createHash('sha256').update(s).digest('hex').slice(0,24);
 const verbs=new Set(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']);
-const routeOK=s=>typeof s==='string'&&s.length<=180&&/^\/(?:[\w/:[\].-]*)$/.test(s);
+const routeOK=s=>typeof s==='string'&&s.length<=180&&/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/\[\]{}-]*$/.test(s);
+const normalizeRoute=(value)=>{
+  if(typeof value !== 'string') return null;
+  let route=value.trim();
+  if(!route) return null;
+  if(route.includes('?')||route.includes('#')) route=route.split(/[?#]/,1)[0];
+  if(/^https?:\/\//i.test(route)){try{const parsed=new URL(route);route=parsed.pathname||'/';}catch{return null;}}
+  if(!route.startsWith('/')) route='/'+route;
+  route=route.replace(/\/+/g,'/');
+  if(route.length>1 && route.endsWith('/')) route=route.slice(0,-1);
+  if(!routeOK(route)) return null;
+  return route;
+};
+const routeMatch=(pattern,request)=>{
+  const left=normalizeRoute(pattern),right=normalizeRoute(request);
+  if(!left || !right) return false;
+  if(left===right) return true;
+  const lp=left.split('/').filter(Boolean), rp=right.split('/').filter(Boolean);
+  if(lp.length!==rp.length) return false;
+  return lp.every((part,index)=>part===rp[index] || /^(?::\w+|\[\w+\]|\{\w+\})$/.test(part) || /^(?::\w+|\[\w+\]|\{\w+\})$/.test(rp[index]));
+};
+const withPrefix=(base,suffix)=>{
+  const left=normalizeRoute(base) || '/';
+  const right=normalizeRoute(suffix) || '/';
+  if(left === '/' && right === '/') return '/';
+  if(left === '/') return right;
+  if(right === '/') return left;
+  return `${left.replace(/\/+$/,'')}/${right.replace(/^\/+/, '')}`;
+};
+const receiverName=(expr)=>{
+  if(ts.isIdentifier(expr)) return expr.text;
+  if(ts.isPropertyAccessExpression(expr)) return expr.name.text;
+  if(ts.isCallExpression(expr)&&ts.isPropertyAccessExpression(expr.expression)) return expr.expression.name.text;
+  return null;
+};
 const literal=n=>n&&ts.isStringLiteralLike(n)?n.text:null;
 // All inputs are in-memory source. No package loading, execution or network access.
 export function detectRelationships(sources,context,maxEdges=10000,extraRoutes=[]){
  const byPath=new Map(sources.map(s=>['/'+s.fileName,s]));
  const host={getSourceFile:f=>byPath.get(f),getDefaultLibFileName:()=>'',writeFile:()=>{},getCurrentDirectory:()=> '/',getDirectories:()=>[],fileExists:f=>byPath.has(f),readFile:f=>byPath.get(f)?.text,useCaseSensitiveFileNames:()=>true,getCanonicalFileName:f=>f,getNewLine:()=> '\n'};
  const program=ts.createProgram([...byPath.keys()],{allowJs:true,noLib:true,noResolve:false,moduleResolution:ts.ModuleResolutionKind.Node10},host),checker=program.getTypeChecker();
- const nodes=[],edges=[],nodeMap=new Map(),functions=new Map(),routes=[...extraRoutes],requests=[];
+ const nodes=[],edges=[],nodeMap=new Map(),functions=new Map(),routes=[...extraRoutes],requests=[],routerPrefixes=new Map();
  const evidence=n=>{const s=n.getSourceFile();return {...context,file:s.fileName.replace(/^\//,''),startLine:s.getLineAndCharacterOfPosition(n.getStart(s)).line+1,endLine:s.getLineAndCharacterOfPosition(n.end-1).line+1};};
  const symbol=n=>{let s=checker.getSymbolAtLocation(n);if(s?.flags&ts.SymbolFlags.Alias){try{s=checker.getAliasedSymbol(s);}catch{}}return s;};
  const scopeName=n=>{const parts=[];for(let p=n;p;p=p.parent){if(ts.isFunctionDeclaration(p)&&p.name)parts.unshift(p.name.text);else if(ts.isVariableDeclaration(p)&&ts.isIdentifier(p.name))parts.unshift(p.name.text);}return parts.join('.');};
@@ -19,6 +53,7 @@ export function detectRelationships(sources,context,maxEdges=10000,extraRoutes=[
  const walk=(n,fn)=>{fn(n);ts.forEachChild(n,c=>walk(c,fn));};
  // Name resolution excludes comments, strings and shadowed local identifiers.
  for(const s of sources)walk(s,n=>{
+  if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.initializer&&ts.isCallExpression(n.initializer)&&((ts.isPropertyAccessExpression(n.initializer.expression)&&n.initializer.expression.name.text==='Router')||(ts.isIdentifier(n.initializer.expression)&&n.initializer.expression.text==='Router'))){routerPrefixes.set(n.name.text,'/');}
   const named=ts.isFunctionDeclaration(n)&&n.name?n.name:ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.initializer&&(ts.isArrowFunction(n.initializer)||ts.isFunctionExpression(n.initializer))?n.name:null;
   if(named){const target=node(`function:${file(n)}:${scopeName(n)}`,named.text,'function',n,'A named piece of code that performs work when called. Its presence does not prove it runs.');functions.set(symbol(named),target);edge(id(file(n)),target,'defines-function',n,'This file defines this function.');}
  });
@@ -37,7 +72,7 @@ export function detectRelationships(sources,context,maxEdges=10000,extraRoutes=[
   if(ts.isNewExpression(n)&&ts.isIdentifier(n.expression)&&imported(n.expression,'@prisma/client','PrismaClient'))return 'prisma';
   return null;
  }
- const addRoute=(method,route,n,handler)=>{if(!routeOK(route)||!verbs.has(method))return;const target=node(`endpoint:${file(n)}:${method}:${route}`,`${method} ${route}`,'api-endpoint',n,'An address where this code declares it can receive an HTTP request. Deployment is not verified.');edge(id(file(n)),target,'declares-endpoint',n,'This file declares the request endpoint.');if(handler)edge(target,handler,'handled-by',n,'Requests to this endpoint are assigned to this handler in source.');routes.push({method,route,target,n});};
+ const addRoute=(method,route,n,handler)=>{if(!route || !routeOK(route) || !verbs.has(method))return;const target=node(`endpoint:${file(n)}:${method}:${route}`,`${method} ${route}`,'api-endpoint',n,'An address where this code declares it can receive an HTTP request. Deployment is not verified.');edge(id(file(n)),target,'declares-endpoint',n,'This file declares the request endpoint.');if(handler)edge(target,handler,'handled-by',n,'Requests to this endpoint are assigned to this handler in source.');routes.push({method,route,target,n});};
  for(const s of sources){
   const f=s.fileName.replace(/^\//,'');
   const next=f.match(/(?:^|\/)app\/(api\/.*)\/route\.[cm]?[jt]sx?$/);
@@ -52,14 +87,20 @@ export function detectRelationships(sources,context,maxEdges=10000,extraRoutes=[
   }}
   walk(s,n=>{if(!ts.isCallExpression(n))return;const caller=enclosing(n),callee=n.expression;
    if(ts.isIdentifier(callee)){const target=functions.get(symbol(callee));if(target)edge(caller,target,'calls-function',n,'This code contains a direct call to this function. Whether the call executes depends on runtime conditions.');}
-   if(ts.isPropertyAccessExpression(callee)&&client(callee.expression)==='express'&&verbs.has(callee.name.text.toUpperCase())){
-    const route=literal(n.arguments[0]),handler=n.arguments.at(-1);addRoute(callee.name.text.toUpperCase(),route,n,handler&&functions.get(symbol(handler)));
+   if(ts.isPropertyAccessExpression(callee)&&callee.name.text.toLowerCase()==='use'&&n.arguments[0]){
+    const mount=normalizeRoute(literal(n.arguments[0]));
+    const parentName=receiverName(callee.expression);
+    const routerTarget=receiverName(n.arguments[1]);
+    if(mount && routerTarget && parentName){routerPrefixes.set(routerTarget,withPrefix(routerPrefixes.get(parentName) || '/', mount));}
+   }
+   if(ts.isPropertyAccessExpression(callee)&&((client(callee.expression)==='express')||routerPrefixes.has(receiverName(callee.expression)))&&verbs.has(callee.name.text.toUpperCase())){
+    const route=normalizeRoute(literal(n.arguments[0])),handler=n.arguments.at(-1);addRoute(callee.name.text.toUpperCase(),withPrefix(routerPrefixes.get(receiverName(callee.expression)) || '/', route || '/'),n,handler&&functions.get(symbol(handler)));
    }
    if(ts.isIdentifier(callee)&&callee.text==='fetch'&&!symbol(callee)){
     const url=literal(n.arguments[0]);let method='GET',known=true;
-    const options=n.arguments[1];if(options){if(ts.isObjectLiteralExpression(options)){for(const prop of options.properties){if(ts.isSpreadAssignment(prop)){known=false;continue;}if(ts.isPropertyAssignment(prop)&&(prop.name.text==='method')){method=literal(prop.initializer)?.toUpperCase();if(!verbs.has(method))known=false;}}}else known=false;}
-    if(url&&routeOK(url)&&known){const target=node(`request:${f}:${method}:${url}`,`${method} ${url}`,'http-request',n,'Code that asks an HTTP endpoint for information or sends it information.');edge(caller,target,'requests-http',n,'This code declares an HTTP request.');requests.push({method,route:url,target,n});}
-    else if(url){try{const parsed=new URL(url);if(['https:','http:'].includes(parsed.protocol)&&!parsed.username&&!parsed.password){const target=node(`service:${parsed.hostname}`,parsed.hostname,'external-service',n,'An external host explicitly named in an HTTP request. Only its hostname is retained.');edge(caller,target,'requests-service',n,'This code sends an HTTP request to this host. A successful live connection is not established.');}}catch{}}
+    const options=n.arguments[1];if(options){if(ts.isObjectLiteralExpression(options)){for(const prop of options.properties){if(ts.isSpreadAssignment(prop)){known=false;continue;}if(ts.isPropertyAssignment(prop)&&ts.isIdentifier(prop.name)&&prop.name.text==='method'){method=literal(prop.initializer)?.toUpperCase();if(method&&!verbs.has(method))known=false;}}}else known=false;}
+    if(url){try{const parsed=new URL(url);if(['https:','http:'].includes(parsed.protocol)&&!parsed.username&&!parsed.password){const target=node(`service:${parsed.hostname}`,parsed.hostname,'external-service',n,'An external host explicitly named in an HTTP request. Only its hostname is retained.');edge(caller,target,'requests-service',n,'This code sends an HTTP request to this host. A successful live connection is not established.');}}catch{}}
+    const path=normalizeRoute(url);if(path&&known){const target=node(`request:${f}:${method}:${path}`,`${method} ${path}`,'http-request',n,'Code that asks an HTTP endpoint for information or sends it information.');edge(caller,target,'requests-http',n,'This code declares an HTTP request.');requests.push({method,route:path,target,n});}
    }
    if(!ts.isPropertyAccessExpression(callee))return;
    // Supabase: a direct createClient binding followed by from(literal).operation().
@@ -74,6 +115,6 @@ export function detectRelationships(sources,context,maxEdges=10000,extraRoutes=[
    }
   });
  }
- for(const request of requests){const matches=routes.filter(r=>(r.method===request.method||r.method==='ANY')&&r.route===request.route);if(matches.length===1)edge(request.target,matches[0].target,'may-request-endpoint',request.n,'The request method and path match this declared endpoint. Proxying and deployment can change where it arrives.','inferred');}
+ for(const request of requests){const matches=routes.filter(r=>(r.method===request.method||r.method==='ANY')&&routeMatch(r.route,request.route));if(matches.length===1)edge(request.target,matches[0].target,'may-request-endpoint',request.n,'The request method and path match this declared endpoint. Proxying and deployment can change where it arrives.','inferred');}
  return {nodes,edges:edges.map(({semanticKey,...e})=>e)};
 }

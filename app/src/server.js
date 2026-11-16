@@ -37,6 +37,7 @@ export function createApplication(config, service = providers(config), clock = D
     '/workspace.css': [new URL('./workspace/style.css', import.meta.url), 'text/css'],
     '/workspace.js': [new URL('./local-workspace-client.js', import.meta.url), 'text/javascript'],
     '/workspace/app.js': [new URL('./workspace/app.js', import.meta.url), 'text/javascript'],
+    '/workspace/navigation.js': [new URL('./workspace/navigation.js', import.meta.url), 'text/javascript'],
     '/workspace/model.js': [new URL('./workspace/model.js', import.meta.url), 'text/javascript'],
     '/overlays.js': [new URL('./overlays.js', import.meta.url), 'text/javascript'],
   };
