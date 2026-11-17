@@ -158,10 +158,11 @@ function classifySources(nodes, edges) {
 
   const backend = [...signals.values()].some(record => record.backend);
   const frontend = [...signals.values()].some(record => record.frontend);
+  const directGroups = new Map(fileGroups);
   for (const [file, record] of signals) {
     if (fileGroups.get(file) === 'Unclassified') {
       const importingGroups = new Set([...record.importedBy]
-        .map(importer => fileGroups.get(importer))
+        .map(importer => directGroups.get(importer))
         .filter(group => group === 'Frontend' || group === 'Backend'));
       if (importingGroups.size > 1) {
         fileGroups.set(file, 'Shared modules');
@@ -170,23 +171,23 @@ function classifySources(nodes, edges) {
       }
     }
     if (fileGroups.get(file) !== 'Unclassified') continue;
-    const importGroups = new Set([...record.importedBy].map(importer => fileGroups.get(importer)).filter(Boolean));
-    if (importGroups.has('Commands')) {
+    const importGroups = new Set([...record.importedBy].map(importer => directGroups.get(importer)).filter(Boolean));
+    if (importGroups.size === 1 && importGroups.has('Commands')) {
       fileGroups.set(file, 'Core processing');
       groupReasons.set(file, 'Imported by a source file with an evidenced command entry point.');
       continue;
     }
-    if (importGroups.has('Worker triggers')) {
+    if (importGroups.size === 1 && importGroups.has('Worker triggers')) {
       fileGroups.set(file, 'Worker processing');
       groupReasons.set(file, 'Imported by a source file with an evidenced worker or scheduled trigger.');
       continue;
     }
-    if (importGroups.has('Public interface')) {
+    if (importGroups.size === 1 && importGroups.has('Public interface')) {
       fileGroups.set(file, 'Library modules');
       groupReasons.set(file, 'Imported by a source file with an evidenced public library interface.');
       continue;
     }
-    const importers = [...record.importedBy].map(importer => fileGroups.get(importer));
+    const importers = [...record.importedBy].map(importer => directGroups.get(importer));
     if (importers.length && importers.every(group => group === 'Frontend') && importGroups.size === 1) {
       fileGroups.set(file, 'Frontend modules');
       groupReasons.set(file, 'Imported only by source files with direct frontend evidence. This is an inferred role association, not proof that the module runs in a browser.');

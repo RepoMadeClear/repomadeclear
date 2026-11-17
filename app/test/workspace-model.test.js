@@ -182,3 +182,29 @@ test('saved classification reasons are distinguished from current inferred asses
   assert.equal(currentScan.nodes[0].classificationReasonRecorded, true);
   assert.equal(currentScan.nodes[0].classificationReason, 'Framework role is not supported.');
 });
+
+test('conflicting entry-point importers remain uncertain regardless of input order', () => {
+  const command = source('command', 'main.js');
+  const worker = source('worker', 'job.js');
+  const helper = source('helper', 'helper.js');
+  const nodes = [command, worker, helper,
+    item('cli', 'command', 'cli-command', command.label),
+    item('trigger', 'job', 'worker-trigger', worker.label)];
+  const edges = [
+    edge('command-import', command.id, helper.id, 'imports-source', command.label),
+    edge('worker-import', worker.id, helper.id, 'imports-source', worker.label),
+  ];
+  for (const order of [nodes, [...nodes].reverse()]) {
+    assert.equal(project(order, edges).nodes.find(node => node.id === helper.id).group, 'Unclassified');
+  }
+});
+
+test('unseeded import cycle remains uncertain', () => {
+  const a = source('a', 'a.js');
+  const b = source('b', 'b.js');
+  const result = project([a, b], [
+    edge('ab', a.id, b.id, 'imports-source', a.label),
+    edge('ba', b.id, a.id, 'imports-source', b.label),
+  ]);
+  assert.ok(result.nodes.every(node => node.group === 'Unclassified'));
+});

@@ -1,3 +1,11 @@
+## Classification conflict follow-up — local
+
+Verified the existing progressive-exploration milestone and tightened remaining role inference. Importer roles now come from an immutable first-pass snapshot. Command, worker, and public-interface inference requires one consistent importer group, preventing a single command importer from overriding a conflicting worker or unknown importer. Multi-hop propagation remains bounded to direct evidence.
+
+Added regressions for conflicting command/worker importers in reversed node order and unseeded cyclic imports. All 110 tests pass; hosted bundle builds with placeholder public Supabase configuration; diff check passes.
+
+Available historical local snapshots contain 8 or 10 components, with respectively 3 or 5 Unclassified files: cli.js, map.js, scanner.js, and in the larger snapshots editor-client.js and overlays.js. These snapshots lack sufficient role signals under the current rules. Their remaining counts are not an accuracy benchmark. The reported authenticated 83/384-component scans were not accessed during this follow-up. The prior handoff's 203-to-124 comparison is prior work, not a new measurement from this follow-up. User-editable roles still need versioned overlay fields and server validation. Current presentation fixes apply to existing scans; additional scanner evidence would require rescanning.
+
 ## Progressive exploration and role classification — November 17, 2026
 
 Local-only milestone. The reported authenticated production scans (83 and 384 components) were not accessible, so no claims are made about their exact assignments. The local baseline preview used a real working-copy scan. Before the UI changes it showed 185 Unclassified components in a narrow, three-column 316×64-unit card stack with 350-unit horizontal and 112-unit vertical spacing. Hundreds of cards stretched the viewBox vertically, reducing rendered text below a readable size. The zoom readout displayed the internal scale multiplier (100%), not the actual viewport-to-viewBox scale.
