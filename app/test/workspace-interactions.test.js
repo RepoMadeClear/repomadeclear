@@ -78,6 +78,8 @@ test('workspace component selection, click-vs-drag, node movement, and empty-can
   const source = (await readFile(appPath, 'utf8')).replace(/^import\b[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '');
   const elements = new Map();
   const document = {
+    querySelector:()=>null,
+    body:{classList:{contains:()=>true}},
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, new Element('div'));
       return elements.get(id);
@@ -188,7 +190,7 @@ test('workspace component selection, click-vs-drag, node movement, and empty-can
     'fitView', 'installWheelNavigation', 'panByScreenPixels', 'screenDeltaToViewBox', 'zoomByStep',
     'aggregateOverviewEdges', 'layoutOverviewGroups', 'routeOverviewEdges',
     'EXPLORATION_LIMITS', 'buildStructuralTree', 'chooseExplorationMode', 'effectiveZoomPercent',
-    'findStructureItem', 'findStructurePath', 'structureItemsAt',
+    'findStructureItem', 'findStructurePath', 'structureItemsAt', 'location', 'mountReader',
     `return (async()=>{${source}\nreturn {svg,view:()=>({scale,offset:{...offset},bounds:{...bounds}}),zoom:()=>$('zoom-label').textContent};})()`,
   );
   const app = await boot(
@@ -197,7 +199,7 @@ test('workspace component selection, click-vs-drag, node movement, and empty-can
     fitView, installWheelNavigation, panByScreenPixels, screenDeltaToViewBox, zoomByStep,
     aggregateOverviewEdges, layoutOverviewGroups, routeOverviewEdges,
     EXPLORATION_LIMITS, buildStructuralTree, chooseExplorationMode, effectiveZoomPercent,
-    findStructureItem, findStructurePath, structureItemsAt,
+    findStructureItem, findStructurePath, structureItemsAt, {search:''}, ()=>({}),
   );
 
   const overviewConnections = app.svg.children.filter(element => element.className === 'overview-edge');

@@ -1,3 +1,4 @@
+import {isStoryDocument,readProjectDocument,readInterfaceText} from './project-story.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { detectJava } from './java-relationships.js';
 import { detectRelationships } from './relationships.js';
 import { isSupportedSource, languageFor, ANALYZED_LANGUAGES } from './supported-languages.js';
 
-export const VERSION = '0.5.0';
+export const VERSION = '0.6.0';
 export const LIMITS = Object.freeze({ files: 2000, bytes: 20_000_000, fileBytes: 500_000, milliseconds: 15000, edges: 10000 });
 const jsExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 const browserGlobals = new Set(['document', 'window', 'navigator', 'localStorage', 'sessionStorage']);
@@ -46,6 +47,10 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
   const files = new Set(supported.map(x => x.file));
   const nodes = supported.map(x => ({ id: id(x.file), label: x.file, kind: 'source', certainty: 'detected', fingerprint: x.hash,
     explanation: ANALYZED_LANGUAGES.includes(languageFor(x.file)) ? 'A source file present in this commit.' : 'Recognized source file. Relationship analysis for this language is not implemented.' }));
+  const documentEntry=tree.filter(e=>['100644','100755'].includes(e.mode)&&isStoryDocument(e.file)&&e.size<=48000).sort((a,b)=>a.file.localeCompare(b.file))[0];
+  const documentText=documentEntry?read(documentEntry):null;
+  const projectStory=documentText?readProjectDocument(documentText,{repository,branch,commit,file:documentEntry.file}):{purpose:null,limitations:[]};
+  projectStory.schemaVersion=1;
   const edges = [], sources = [], occurrences = new Map();
   let unresolved = 0, dynamic = 0;
   const evidence = (file, source, node) => ({ repository, branch, commit, file,
@@ -75,6 +80,7 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
       ts.forEachChild(node, collectBindings);
     };
     collectBindings(source);
+    sourceNode.interfaceText=readInterfaceText(source,{repository,branch,commit,file:entry.file});
     sources.push(source);
     const add = (literal, node, typeOnly = false) => {
       const spec = literal.text;
@@ -142,12 +148,14 @@ export function scanSnapshot({ tree, commit, branch, repository, read, limits = 
   checkTime();
   const indexedOnly = supported.filter(e => !ANALYZED_LANGUAGES.includes(languageFor(e.file)));
   return { schemaVersion: 2, scannerVersion: VERSION, repository, branch, commit, scannedAt: new Date().toISOString(),
+    projectStory,
     nodes: [...new Map(nodes.map(n => [n.id, n])).values()], edges,
     coverage: { scannedFiles: supported.length, omittedFiles: tree.length - supported.length, unresolvedReferences: unresolved, omittedCalls: dynamic,
       analyzedFiles: supported.length - indexedOnly.length, indexedOnlyFiles: indexedOnly.length,
       indexedOnlyLanguages: [...new Set(indexedOnly.map(e => languageFor(e.file)))],
       supported: 'JS/TS imports, calls, routes, direct browser API references and selected integrations; Python imports, functions, routes and HTTP hosts; Java imports, some method declarations and literal Spring annotations.',
-      gaps: ['C, C++, C#, SQL, Go, Rust, PHP, Kotlin, Swift, Ruby and R are indexed only; no relationships are extracted for these languages.',
+      gaps: ['Project purpose comes from one root README (up to 48 KB); screen suggestions use literal JS/TS JSX headings and actions. Documentation is intent, not proof of implemented or live behavior.',
+        'C, C++, C#, SQL, Go, Rust, PHP, Kotlin, Swift, Ruby and R are indexed only; no relationships are extracted for these languages.',
         'Java patterns are conservative and not a full Java grammar; Java method calls and database integrations are not detected.',
         'Static source evidence only; no runtime, infrastructure or business-impact discovery.',
         'Excluded tests, generated directories, secret-like paths and environment files are not analyzed.'] },

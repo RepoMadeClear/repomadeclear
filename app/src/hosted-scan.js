@@ -1,3 +1,6 @@
+import {isStoryDocument} from './project-story.js';
+import {model} from './workspace/model.js';
+import {buildExplanation,explainArea,relationshipWords} from './explanations.js';
 import {createHash} from 'node:crypto';
 import {scanSnapshot, excluded, safeName, VERSION} from './scanner.js';
 import {isSupportedSource} from './supported-languages.js';
@@ -5,23 +8,14 @@ import {credentialVault} from './github-store.js';
 import {HttpError} from './providers.js';
 
 export function overview(scan) {
-  const groups=new Map(), membership=new Map();
-  for(const node of scan.nodes) {
-    const label=node.kind!=='source'&&node.kind!=='package-reference'?({'function':'Functions','api-endpoint':'API endpoints','http-request':'HTTP requests','database-table':'Database operations','external-service':'External services'}[node.kind]||'Other components'):node.kind==='package-reference'?'External packages':node.label.includes('/')?node.label.slice(0,node.label.lastIndexOf('/')):'Root source';
-    const key=createHash('sha256').update(label).digest('hex').slice(0,16);
-    if(!groups.has(key)) groups.set(key,{id:key,label,count:0});
-    groups.get(key).count++; membership.set(node.id,key);
-  }
+  // Only aggregate areas and relationship types leave the server in a free overview.
+  const graph=model(scan),membership=new Map();
+  const groups=graph.groups.map(g=>{const id=createHash('sha256').update(g.label).digest('hex').slice(0,16);for(const node of g.nodes)membership.set(node,id);const copy=explainArea(g.label);return {id,label:copy.title,summary:copy.summary,count:g.nodes.length};});
   const links=new Map();
-  for(const edge of scan.edges) {
-    const source=membership.get(edge.source),target=membership.get(edge.target);
-    if(source!==target) {
-      const key=source+':'+target;
-      if(!links.has(key))links.set(key,{source,target,count:0});
-      links.get(key).count++;
-    }
-  }
-  return {repository:scan.repository,branch:scan.branch,commit:scan.commit,scannedAt:scan.scannedAt,groups:[...groups.values()],connections:[...links.values()],coverage:scan.coverage};
+  for(const edge of scan.edges){const source=membership.get(edge.source),target=membership.get(edge.target);if(!source||!target||source===target)continue;const key=source+':'+target;const label=relationshipWords(edge);if(!links.has(key))links.set(key,{source,target,count:0,labels:[]});const link=links.get(key);link.count++;if(!link.labels.includes(label))link.labels.push(label);}
+  const story=buildExplanation(scan);
+  const projectSummary={title:story.purpose.title,summary:story.purpose.summary,origin:story.purpose.origin,limitations:story.limitations.map(x=>x.text),tasks:[...story.capabilities.map(p=>({title:p.title,summary:p.summary})),...story.documentTasks.map(t=>({title:'Described by the project',summary:t.text}))],hasStoryEvidence:story.hasStoryEvidence};
+  return {projectSummary,repository:scan.repository,branch:scan.branch,commit:scan.commit,scannedAt:scan.scannedAt,groups,connections:[...links.values()],coverage:scan.coverage};
 }
 
 async function openSnapshot(vault,envelope,user,record){
@@ -66,10 +60,12 @@ export async function runHostedScan({config,token,user,service,githubToken,body,
     if(supported.length>200)throw new HttpError(422,`Source file limit reached: ${supported.length} recognized source files found; maximum 200.`);
     if(supported.some(x=>x.size>200000))throw new HttpError(422,'A recognized source file exceeds the 200 KB per-file limit.');
     if(supported.reduce((n,x)=>n+x.size,0)>20000000)throw new HttpError(422,'Recognized source exceeds 20 MB. Images and documentation do not count toward this limit.');
+    const documents=tree.filter(e=>['100644','100755'].includes(e.mode)&&isStoryDocument(e.file)&&e.size<=48000).sort((a,b)=>a.file.localeCompare(b.file)).slice(0,1);
+    const download=[...supported,...documents];
     const content=new Map();let next=0;
     await Promise.all(Array.from({length:4},async()=>{
-      while(next<supported.length){
-        const entry=supported[next++];
+      while(next<download.length){
+        const entry=download[next++];
         if(Date.now()>deadline)throw new HttpError(422,'Scan time limit reached.');
         const blob=await service.githubRead(`${route}/git/blobs/${entry.hash}`,githubToken);
         if(blob.encoding!=='base64'||blob.size>200000||blob.content.length>280000)throw new HttpError(422,'Unsupported source blob.');

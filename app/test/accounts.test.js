@@ -204,7 +204,8 @@ test('local scan endpoint returns a grouped overview and saves encrypted evidenc
   assert.equal(result.status, 200, result.text);
   assert.equal(result.data.overview.repository, 'test/repo');
   assert.equal(result.data.overview.coverage.scannedFiles, 2);
-  assert.equal(result.data.overview.connections.length, 1);
+  assert.equal(result.data.overview.connections.length, 0, 'relationships within one reader area are collapsed');
+  assert.ok(result.data.overview.groups.some(g=>g.label==='Parts that need an explanation'));
   assert.ok(result.data.scanKey);
   assert.ok(!result.text.includes('src/a.ts'));
   assert.ok(!result.text.includes('PRIVATE-GITHUB-TOKEN'));

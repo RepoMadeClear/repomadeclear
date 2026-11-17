@@ -40,3 +40,14 @@ test('old workspace links resolve only a map for their user and repository',asyn
  await assert.rejects(paidMap({config,user,repository:{id:99,full_name:'another/repo'},body},{payments}),e=>e.status===404);
  await assert.rejects(paidMap({config,user:{id:'bob'},repository,body},{payments}),e=>e.status===404);
 });
+
+test('presentation edits use authenticated encrypted versioned storage and survive reload',async()=>{
+ const vault=credentialVault(config.encryptionKey),key='c'.repeat(64),scan={repository:'org/repo',branch:'main',nodes:[],edges:[],commit:'a'.repeat(40),scannerVersion:'test'};
+ const envelope=await vault.seal({scan},user.id,'scan',60);let stored=null;
+ const payments={paid:async()=>({paid:true}),db:{from(table){const q={select:()=>q,eq:()=>q,limit:()=>q,maybeSingle:async()=>({data:table==='rmc_repository_scans'?{envelope,scan_key:key}:table==='rmc_repository_overlays'?stored:null})};return q;},async rpc(name,p){assert.equal(name,'rmc_save_repository_overlay');assert.equal(p.p_user,user.id);assert.equal(p.p_branch,'main');stored={scan_key:key,envelope:p.p_envelope,version:p.p_version+1};return {data:true};}}};
+ const operation={type:'presentation',id:'project',title:'A team explanation',summary:'We supplied this purpose.',references:[]};
+ await assert.rejects(paidMap({config,user,repository,body:{action:'edit',scanKey:key,version:0,operation}},{payments:{...payments,paid:async()=>({paid:false})}}),e=>e.status===402);
+ const saved=await paidMap({config,user,repository,body:{action:'edit',scanKey:key,version:0,operation}},{payments});assert.equal(saved.overlay.presentation.entries[0].author,user.id);assert.equal(saved.version,1);assert.ok(!stored.envelope.includes('We supplied'));
+ const loaded=await paidMap({config,user,repository,body:{action:'details',scanKey:key}},{payments});assert.equal(loaded.overlay.presentation.entries[0].summary,'We supplied this purpose.');
+ await assert.rejects(paidMap({config,user,repository,body:{action:'edit',scanKey:key,version:0,operation}},{payments}),e=>e.status===409);
+});

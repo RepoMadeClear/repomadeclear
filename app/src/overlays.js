@@ -10,9 +10,9 @@ export function createOverlayEngine() {
   const anchor = value => value == null ? null : ({ fingerprint: text(value.fingerprint, 128), commit: text(value.commit, 64), scannerVersion: text(value.scannerVersion, 30) });
   const find = (scan, type, id) => (type === 'node' ? scan.nodes : scan.edges).find(n => n.id === id);
   const bind = (scan, entity) => entity ? { fingerprint: entity.fingerprint || '', commit: scan.commit, scannerVersion: scan.scannerVersion } : null;
-  const fresh = scan => ({ schemaVersion: 1, repository: scan.repository, branch: scan.branch, overrides: [], nodes: [], edges: [], positions: [] });
+  const fresh = scan => ({ schemaVersion: 2, repository: scan.repository, branch: scan.branch, overrides: [], nodes: [], edges: [], positions: [], presentation: {schemaVersion: 1, entries: [], order: []} });
   function validate(input, scan) {
-    if (!input || input.schemaVersion !== 1 || input.repository !== scan.repository || input.branch !== scan.branch) fail('Edits belong to a different repository or branch');
+    if (!input || ![1, 2].includes(input.schemaVersion) || input.repository !== scan.repository || input.branch !== scan.branch) fail('Edits belong to a different repository or branch');
     const result = fresh(scan);
     for (const name of ['overrides', 'nodes', 'edges', 'positions']) {
       if (!Array.isArray(input[name]) || input[name].length > MAX) fail('Too many edits or invalid edit file');
@@ -41,6 +41,23 @@ export function createOverlayEngine() {
         if (name === 'nodes') return { id: key, label: text(item.label, 160), explanation: text(item.explanation), certainty: 'human-supplied', ...meta(item) };
         return { id: key, source: identifier(item.source), target: identifier(item.target), explanation: text(item.explanation), certainty: 'human-supplied', sourceAnchor: anchor(item.sourceAnchor), targetAnchor: anchor(item.targetAnchor), ...meta(item) };
       });
+    }
+    if (input.presentation != null) {
+      const p = input.presentation;
+      if (p.schemaVersion !== 1 || !Array.isArray(p.entries) || p.entries.length > 200 || !Array.isArray(p.order) || p.order.length > 200) fail('Invalid presentation');
+      const key = value => typeof value === 'string' && /^(project|part:[a-f0-9]{24}|part:human:[a-z0-9-]{1,80}|step:[a-z0-9:-]{1,100})$/.test(value) ? value : fail('Invalid presentation key');
+      const seen = new Set();
+      result.presentation.entries = p.entries.map(item => {
+        const id = key(item.id); if (seen.has(id)) fail('Duplicate presentation entry'); seen.add(id);
+        if (!Array.isArray(item.references) || item.references.length > 200) fail('Too many presentation references');
+        if (item.inclusion && !['automatic','include','supporting'].includes(item.inclusion)) fail('Invalid story inclusion');
+        return {id, inclusion:item.inclusion||'automatic', title: text(item.title, 160), summary: text(item.summary, 2000), commit: text(item.commit, 64),
+          references: item.references.map(ref => {
+            if (!['node','edge'].includes(ref.type)) fail('Invalid presentation reference');
+            return {id: identifier(ref.id), type: ref.type, anchor: anchor(ref.anchor)};
+          }), ...meta(item)};
+      });
+      result.presentation.order = [...new Set(p.order.map(key))];
     }
     if (result.nodes.some(n => result.edges.some(e => e.id === n.id))) fail('Duplicate human ID');
     return result;
@@ -71,6 +88,10 @@ export function createOverlayEngine() {
     for (const item of state.positions) {
       if (!scan.nodes.some(n => n.id === item.targetId) && !state.nodes.some(n => n.id === item.targetId)) issues.push({ key: item.targetId, targetId: item.targetId, reason: 'Moved component is missing. Its saved position is retained.' });
     }
+    for (const item of state.presentation.entries) {
+      if (!item.references.length && item.commit !== scan.commit) issues.push({key:item.id, targetId:item.id, reason:'The project changed since this explanation was reviewed. Your wording is retained.'});
+      for (const ref of item.references) inspect(item.id, ref.id, ref.type, ref.anchor, 'Presentation evidence');
+    }
     return issues;
   }
   function apply(scan, input, operation, author, now = new Date().toISOString()) {
@@ -82,7 +103,33 @@ export function createOverlayEngine() {
       if (index < 0) collection.push(value); else collection[index] = value;
     };
     const nodeExists = id => scan.nodes.some(n => n.id === id) || state.nodes.some(n => n.id === id);
-    if (operation.type === 'note') {
+    if (operation.type === 'presentation') {
+      if (!Array.isArray(operation.references) || operation.references.length > 200) fail('Invalid presentation references');
+      const references = operation.references.map(ref => {
+        if (!['node','edge'].includes(ref.type)) fail('Invalid presentation reference');
+        const entity = find(scan, ref.type, ref.id) || (ref.type === 'node' && state.nodes.find(n => n.id === ref.id));
+        if (!entity) fail('Missing presentation evidence must be reattached before saving');
+        return {id:entity.id, type:ref.type, anchor:bind(scan, entity)};
+      });
+      if (operation.previousId && operation.previousId !== operation.id) {
+        if (!operation.previousId.startsWith('part:') || operation.id !== 'part:'+references[0]?.id || references.length !== 1 || references[0].type !== 'node') fail('Invalid reattachment');
+        if (!state.presentation.entries.some(e=>e.id===operation.previousId)) fail('Original explanation is missing');
+        if (state.presentation.entries.some(e=>e.id===operation.id)) fail('This part already has an explanation');
+        state.presentation.entries=state.presentation.entries.filter(e=>e.id!==operation.previousId);
+      }
+      upsert(state.presentation.entries, 'id', {id:operation.id, inclusion:operation.inclusion||'automatic', title:operation.title, summary:operation.summary, references, commit:scan.commit, ...metadata});
+    } else if (operation.type === 'presentation-order') {
+      state.presentation.order = operation.order;
+    } else if (operation.type === 'presentation-review') {
+      const entry = state.presentation.entries.find(item => item.id === operation.id);
+      if (!entry) fail('Presentation entry is missing');
+      for (const ref of entry.references) {
+        const entity = find(scan, ref.type, ref.id) || (ref.type === 'node' && state.nodes.find(n => n.id === ref.id));
+        if (!entity) fail('Missing presentation evidence must be reattached before review');
+        ref.anchor = bind(scan, entity);
+      }
+      entry.commit = scan.commit; Object.assign(entry, metadata);
+    } else if (operation.type === 'note') {
       const entity = find(scan, operation.targetType, operation.targetId);
       if (!entity) fail('Source target is missing; the previous edit has been retained');
       const previous = state.overrides.find(n => n.targetId === entity.id);
