@@ -54,6 +54,10 @@ The renderer’s `palette` in `src/workspace/app.js` has six `[fill,border,label
 
 `.group-box` is a solid 1.2px stroke with 14px corners and a softly tinted fill; colors come from SVG attributes, not CSS. `.group-label` is 650-weight 13px sans-serif and appears only on the drilldown parent container.
 
+Large drilldowns render structure cards instead of a tiny all-components graph. Structure cards are 316×80 SVG units; focused-map component cards are 300×92. `exploration.js` selects a full component graph only when the area has at most 24 components, titles would render at 12px or larger, and in-area relationship density is at most 2.5 per component. Otherwise, cards are derived from supported package/directory/file structure and paginated to fit the visible canvas. The 24-item inventory/group page and 12-edge relationship page sizes are caps, not fixed counts. The focused map shows at most three peers per direction on wider canvases and one on canvases narrower than 720 CSS pixels. Its card positions keep the selected component fixed while paging or reading relationships.
+
+The zoom readout is the effective rendered scale (`viewport size ÷ current viewBox size × zoom multiplier`) and includes the approximate 14-unit title size in CSS pixels. It should not be styled or interpreted as the internal zoom multiplier alone.
+
 ### Component cards
 
 | Selector / attribute | Current value |

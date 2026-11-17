@@ -72,18 +72,10 @@ header {
   border-radius: 5px;
 }
 
-.header-note {
-  font-size: 12px;
-  color: #7b8595;
-}
-
-.header-note a {
+.back-to-repositories {
   color: #42639a;
-  text-decoration: none;
-}
-
-.header-note a:hover {
-  text-decoration: underline;
+  font-size: 14px;
+  text-underline-offset: 3px;
 }
 
 main {
@@ -180,10 +172,11 @@ p {
 }
 
 #zoom-label {
-  min-width: 42px;
+  min-width: 112px;
   text-align: center;
   color: #67748a;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .explorer {
@@ -236,6 +229,80 @@ p {
   text-align: left;
 }
 
+#search-results .empty-state {
+  margin: 6px 2px;
+  color: #768398;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0;
+  color: #718097;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pagination button {
+  width: auto;
+  margin: 0;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.inventory {
+  margin-top: 20px;
+}
+
+.inventory h3 {
+  margin-top: 0;
+}
+
+.inventory-list {
+  display: grid;
+  gap: 8px;
+}
+
+.inventory-item {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.inventory-item button.inventory-name {
+  display: block;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #254b85;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-item small {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #768398;
+  font: 10px/1.5 ui-monospace, monospace;
+}
+
+.empty-state {
+  padding: 10px;
+  border: 1px dashed #cbd4e0;
+  border-radius: 8px;
+  color: #718097;
+  background: #fbfcfe;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 350px;
@@ -256,6 +323,11 @@ p {
 
 #viewport:active {
   cursor: grabbing;
+}
+
+#viewport[data-exploration-mode="structure"] .canvas-hint,
+#viewport[data-exploration-mode="focused"] .canvas-hint {
+  display: none;
 }
 
 #diagram {
@@ -331,6 +403,18 @@ aside button {
   width: 100%;
   margin: 8px 0;
   text-align: left;
+}
+
+aside .inventory button {
+  text-align: left;
+}
+
+aside .inventory-item button.inventory-name:hover {
+  text-decoration: underline;
+}
+
+aside .pagination span {
+  min-width: 0;
 }
 
 aside .evidence {
@@ -426,6 +510,12 @@ aside textarea {
 .node-count {
   font: 10px sans-serif;
   fill: #8994a4;
+  pointer-events: none;
+}
+
+.focus-summary {
+  font: 12px sans-serif;
+  fill: #667186;
   pointer-events: none;
 }
 
@@ -705,10 +795,6 @@ footer {
     padding: 0 18px;
   }
 
-  .header-note {
-    display: none;
-  }
-
   main {
     padding: 14px;
   }
@@ -799,10 +885,28 @@ footer {
   .canvas-head {
     padding: 9px 12px;
     gap: 8px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .canvas-head #breadcrumbs {
+    display: flex;
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .canvas-head #breadcrumbs button {
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .controls {
+    width: 100%;
     gap: 4px;
+    justify-content: flex-start;
   }
 
   .controls button {
@@ -816,6 +920,10 @@ footer {
   #viewport {
     height: 520px;
     min-height: 460px;
+  }
+
+  #zoom-label {
+    min-width: 105px;
   }
 
   .canvas-hint {

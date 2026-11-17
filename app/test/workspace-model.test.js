@@ -135,3 +135,50 @@ test('human additions stay separate from detected grouping and evidence', () => 
   assert.equal(result.nodes.find(node => node.id === human.id).certainty, 'human-supplied');
   assert.equal(result.nodes.find(node => node.id === detected.id).group, 'Unclassified');
 });
+
+test('functions inherit established file roles and direct single-role import evidence stays qualified', () => {
+  const backend = source('backend', 'server/routes.js');
+  const helper = source('helper', 'src/request-helper.js');
+  const functionNode = item('helper-function', 'formatRequest', 'function', helper.label);
+  const endpoint = item('endpoint', 'GET /users', 'api-endpoint', backend.label);
+  const result = project([backend, helper, functionNode, endpoint], [
+    edge('endpoint-evidence', backend.id, endpoint.id, 'declares-endpoint', backend.label),
+    edge('helper-import', backend.id, helper.id, 'imports-source', backend.label),
+  ]);
+  assert.equal(result.nodes.find(node => node.id === helper.id).group, 'Backend modules');
+  assert.equal(result.nodes.find(node => node.id === functionNode.id).group, 'Backend modules');
+  assert.equal(result.nodes.find(node => node.id === functionNode.id).classificationReasonRecorded, false);
+  assert.match(result.nodes.find(node => node.id === helper.id).groupReason, /inferred role association/);
+});
+
+test('shared, test, generated, and migration source remain discoverable as distinct categories', () => {
+  const frontend = source('frontend', 'web/client.ts');
+  const backend = source('backend', 'server/routes.ts');
+  const shared = source('shared', 'src/shared.ts');
+  const tests = source('tests', 'src/__tests__/routes.spec.ts');
+  const generated = source('generated', 'src/api.generated.ts');
+  const migration = source('migration', 'db/migrations/001_accounts.sql');
+  const result = project([frontend, backend, shared, tests, generated, migration], [
+    edge('request', frontend.id, item('http', 'GET /users', 'http-request', frontend.label).id, 'requests-http', frontend.label),
+    edge('endpoint', backend.id, item('api', 'GET /users', 'api-endpoint', backend.label).id, 'declares-endpoint', backend.label),
+    edge('front-import', frontend.id, shared.id, 'imports-source', frontend.label),
+    edge('back-import', backend.id, shared.id, 'imports-source', backend.label),
+  ]);
+  const assigned = new Map(result.nodes.map(node => [node.id, node.group]));
+  assert.equal(assigned.get('shared'), 'Shared modules');
+  assert.equal(assigned.get('tests'), 'Tests & fixtures');
+  assert.equal(assigned.get('generated'), 'Generated code');
+  assert.equal(assigned.get('migration'), 'Database schema & migrations');
+  assert.match(result.nodes.find(node => node.id === 'migration').groupReason, /migrations directory/);
+});
+
+test('saved classification reasons are distinguished from current inferred assessments', () => {
+  const oldScan = project([source('old', 'src/unclear.js')]);
+  const currentScan = model({
+    nodes: [{...source('current', 'src/unclear.js'), classificationReason: 'Framework role is not supported.'}],
+    edges: [],
+  });
+  assert.equal(oldScan.nodes[0].classificationReasonRecorded, false);
+  assert.equal(currentScan.nodes[0].classificationReasonRecorded, true);
+  assert.equal(currentScan.nodes[0].classificationReason, 'Framework role is not supported.');
+});

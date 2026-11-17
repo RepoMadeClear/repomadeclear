@@ -1,5 +1,8 @@
 const frontendPath = /(?:^|\/)(?:client|frontend|web|browser|ui)(?:\/|$)/i;
 const supportPath = /(?:^|\/)(?:build|dev|scripts|tools)(?:\/|$)/i;
+const testPath = /(?:^|\/)(?:test|tests|__tests__|fixture|fixtures)(?:\/|$)|(?:\.|-)(?:test|spec)\.[^.]+$/i;
+const generatedPath = /(?:^|\/)generated(?:\/|$)|(?:\.|-)generated\.[^.]+$/i;
+const migrationPath = /(?:^|\/)migrations\/[^/]+\.sql$/i;
 const monorepoPath = /^(apps|packages)\/([^/]+)\//;
 const semanticGroups = new Map([
   ['cli-command', ['Commands', 'A command entry point represented in supported scan evidence.']],
@@ -38,9 +41,14 @@ function packageRoot(file) {
   return match ? {kind: match[1], name: match[2]} : null;
 }
 
+function sourceFile(node) {
+  const file = typeof node.label === 'string' && node.label.trim() ? node.label : node.evidence?.file;
+  return typeof file === 'string' && file.trim() ? file : `unlocated:${node.id}`;
+}
+
 function classifySources(nodes, edges) {
   const byId = new Map(nodes.map(node => [node.id, node]));
-  const sourceByPath = new Map(nodes.filter(node => node.kind === 'source').map(node => [node.label, node]));
+  const sourceByPath = new Map(nodes.filter(node => node.kind === 'source').map(node => [sourceFile(node), node]));
   const signals = new Map([...sourceByPath].map(([file, node]) => [file, {
     node,
     browser: false,
@@ -70,7 +78,7 @@ function classifySources(nodes, edges) {
   }
 
   for (const node of nodes) {
-    const record = signals.get(node.evidence?.file);
+    const record = signals.get(node.kind === 'source' ? sourceFile(node) : node.evidence?.file);
     if (node.kind === 'source' && node.browserEvidence?.length) record && (record.browser = true);
     if (!record) continue;
     if (node.kind === 'cli-command') record.cli = true;
@@ -99,7 +107,19 @@ function classifySources(nodes, edges) {
     const root = packageRoot(file);
     let group;
     let reason;
-    if (root) {
+    if (file.startsWith('unlocated:')) {
+      group = 'Unclassified';
+      reason = 'No source path was recorded for this component, so its file context cannot be assessed.';
+    } else if (migrationPath.test(file)) {
+      group = 'Database schema & migrations';
+      reason = 'The source path is under a migrations directory and has a SQL file extension. This identifies schema-change material, not runtime database activity.';
+    } else if (testPath.test(file)) {
+      group = 'Tests & fixtures';
+      reason = 'The source path or filename uses an explicit test, spec, or fixture naming convention.';
+    } else if (generatedPath.test(file)) {
+      group = 'Generated code';
+      reason = 'The source path or filename explicitly marks this file as generated.';
+    } else if (root) {
       const prefix = root.kind === 'apps' ? 'Application' : 'Package';
       group = `${prefix} · ${root.name}`;
       reason = `Placed under the repository's ${root.kind} directory. This identifies a source boundary, not a deployed runtime.`;
@@ -166,6 +186,17 @@ function classifySources(nodes, edges) {
       groupReasons.set(file, 'Imported by a source file with an evidenced public library interface.');
       continue;
     }
+    const importers = [...record.importedBy].map(importer => fileGroups.get(importer));
+    if (importers.length && importers.every(group => group === 'Frontend') && importGroups.size === 1) {
+      fileGroups.set(file, 'Frontend modules');
+      groupReasons.set(file, 'Imported only by source files with direct frontend evidence. This is an inferred role association, not proof that the module runs in a browser.');
+      continue;
+    }
+    if (importers.length && importers.every(group => group === 'Backend') && importGroups.size === 1) {
+      fileGroups.set(file, 'Backend modules');
+      groupReasons.set(file, 'Imported only by source files with direct backend evidence. This is an inferred role association, not proof that the module runs on a server.');
+      continue;
+    }
   }
   const cli = nodes.some(node => node.kind === 'cli-command');
   const worker = nodes.some(node => node.kind === 'worker-trigger' || node.kind === 'scheduled-trigger');
@@ -217,7 +248,7 @@ function describe(node, group, reason) {
     };
   }
 
-  const filename = node.label.split('/').pop();
+  const filename = (node.label || node.evidence?.file || 'Source location unavailable').split('/').pop();
   const role = roleDescriptions[filename];
   if (node.certainty === 'human-supplied') {
     return {title: node.label, explanation: node.explanation, basis: 'Human-supplied component.'};
@@ -257,8 +288,9 @@ export function model(scan) {
       group = 'External integrations';
       reason = 'An external host is named in source evidence; successful connection is not established.';
     } else if (node.kind === 'source') {
-      group = fileGroups.get(node.label) || 'Unclassified';
-      reason = groupReasons.get(node.label) || 'No supported role evidence was available.';
+      const file = sourceFile(node);
+      group = fileGroups.get(file) || 'Unclassified';
+      reason = groupReasons.get(file) || 'No supported role evidence was available.';
     } else {
       const file = node.evidence?.file || edges.find(edge => edge.source === node.id || edge.target === node.id)?.evidence?.file;
       const declared = semanticGroups.get(node.kind);
@@ -269,11 +301,15 @@ export function model(scan) {
     }
     const details = describe(node, group, reason);
     const human = node.human;
+    const recordedReason = [node.classificationReason, node.roleReason]
+      .find(value => typeof value === 'string' && value.trim());
     return {
       ...node,
       ...details,
       group,
       groupReason: reason,
+      classificationReason: recordedReason || reason,
+      classificationReasonRecorded: Boolean(recordedReason),
       ...(human ? {
         explanation: human.explanation,
         basis: 'Human-supplied explanation · original source evidence retained',
@@ -310,8 +346,18 @@ export function model(scan) {
             ? 'External hosts named in supported source relationships.'
             : label === 'Build & development tools'
               ? 'Supporting source suggested by its repository location; execution is not assumed.'
-              : label === 'Unclassified'
-                ? 'Components retained for review because supported evidence did not establish a role.'
+                : label === 'Database schema & migrations'
+                  ? 'SQL schema-change files located in a migrations directory. This does not establish active database use.'
+                  : label === 'Tests & fixtures'
+                    ? 'Source explicitly named or located as a test, specification, or fixture.'
+                    : label === 'Generated code'
+                      ? 'Source explicitly marked as generated.'
+                      : label === 'Frontend modules'
+                        ? 'Modules imported only by source with direct frontend evidence; the association is inferred.'
+                        : label === 'Backend modules'
+                          ? 'Modules imported only by source with direct backend evidence; the association is inferred.'
+                : label === 'Unclassified'
+                  ? 'Components retained for review because supported evidence did not establish a role.'
                 : label === 'Your additions'
                   ? 'Human-supplied components kept separate from scanner findings.'
                   : label.startsWith('Application ·') || label.startsWith('Package ·')
@@ -324,7 +370,7 @@ export function model(scan) {
       reason: reasons.join(' '),
       category: label === 'Unclassified'
         ? 'uncertain'
-        : ['Referenced dependencies', 'External integrations', 'Build & development tools', 'Your additions'].includes(label)
+        : ['Referenced dependencies', 'External integrations', 'Build & development tools', 'Database schema & migrations', 'Tests & fixtures', 'Generated code', 'Your additions'].includes(label)
           ? 'supporting'
           : 'primary',
       nodes: members.map(node => node.id),
