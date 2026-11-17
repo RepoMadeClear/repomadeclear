@@ -1,3 +1,15 @@
+## Selection return deployed and verified — November 16, 2026
+
+Vercel production deployment dpl_H8xmJLCJeZiwvzR8eDSGQet64ViK is READY and aliased to www.repomadeclear.com. Verified in the existing signed-in Chrome session: opened the easyplan saved map, clicked Back to repositories, and observed GitHub installation brickware-web, repository brickware-web/easyplan, and branch main restored without entering credentials. The five relevant initialization/restoration checks pass. No commit or push.
+
+## Remember map selection on return — local
+
+Workspace return links carry installation/repository IDs and the loaded scan branch. After session restoration, the account picker reloads authorized GitHub choices and restores matching selections in order. Missing/revoked repositories or deleted branches remain unselected; concurrent user selection cancels restoration. No credentials or scan contents are stored in the return URL. Selection does not bypass server verification, scan consent, or access checks. Four regression tests cover exact branch encoding, revoked repositories, deleted branches, and interrupted restoration; account initialization regression also passes. Syntax and diff checks pass. Not deployed in this pass.
+
+## Repository and branch context — local
+
+Workspace displays repository and branch from the loaded scan above its title. Text wraps on narrow screens and is rendered safely as text. Missing metadata uses explicit unavailable labels.
+
 ## Classification conflict follow-up — local
 
 Verified the existing progressive-exploration milestone and tightened remaining role inference. Importer roles now come from an immutable first-pass snapshot. Command, worker, and public-interface inference requires one consistent importer group, preventing a single command importer from overriding a conflicting worker or unknown importer. Multi-hop propagation remains bounded to direct evidence.

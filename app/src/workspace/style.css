@@ -949,3 +949,11 @@ footer {
     gap: 10px 16px;
   }
 }
+
+.repository-context {
+  margin: 0 0 10px;
+  color: #49627f;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

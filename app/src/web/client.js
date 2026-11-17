@@ -28,6 +28,23 @@ function choices(element, rows, placeholder, value, label) {
   for (const row of rows) element.add(new Option(label(row), String(value(row))));
   element.disabled = rows.length === 0;
 }
+// Restore only choices returned by the authenticated GitHub endpoints.
+async function restoreRepositorySelection() {
+  const params = new URLSearchParams(location.search);
+  const selectAvailable = (id, value) => {
+    const element = $(id);
+    if (!value || !Array.from(element.options).some(option => option.value === value)) return false;
+    element.value = value;
+    return true;
+  };
+  if (!selectAvailable('installation', params.get('installation'))) return;
+  const version = selectionVersion;
+  await $('installation').onchange();
+  if (selectionVersion !== version + 1 || !selectAvailable('repository', params.get('repository'))) return;
+  await $('repository').onchange();
+  if (selectionVersion !== version + 2 || !selectAvailable('branch', params.get('branch'))) return;
+  $('branch').onchange();
+}
 async function installations() {
   resetScan();
   choices($('installation'), [], 'Loading GitHub accounts…', i=>i.id, i=>i.account);
@@ -53,7 +70,7 @@ async function refresh() {
   $('identity').textContent = session.email ? `Signed in as ${session.email}` : '';
   $('picker').hidden = !session.githubConnected;
   $('connect').hidden = !!session.githubConnected; $('disconnect').hidden = !session.githubConnected;
-  if (session.githubConnected) await installations();
+  if (session.githubConnected) { await installations(); await restoreRepositorySelection(); }
   route();
 }
 function route() {
@@ -83,11 +100,16 @@ function configureAccessMode() {
   $('scan-result').querySelectorAll(':scope > p')[2].textContent = 'Interactive explanations, evidence and editing are free in this isolated local preview.';
   const pricing = document.querySelector('#pricing');
   if (pricing) {
-    pricing.querySelector('h2').textContent = 'Free in local preview.';
-    pricing.querySelectorAll('.feature-grid article')[1].querySelector('h3').textContent = 'Interactive map';
-    pricing.querySelectorAll('.feature-grid article')[1].querySelector('p').textContent = 'Explanations, source evidence, editing and export are free in this isolated local preview.';
-    pricing.querySelector('.muted').textContent = 'No Stripe checkout or payment is used locally. Scan limits still apply.';
-    document.querySelector('#how-it-works .feature-grid article:last-child p').textContent = 'Explore explanations and evidence, edit your map, and rescan with your human context preserved.';
+    const pricingTitle = pricing.querySelector('h2');
+    if (pricingTitle) pricingTitle.textContent = 'Free in local preview.';
+    const interactiveTitle = pricing.querySelector('.feature-grid article:nth-child(2) h3');
+    if (interactiveTitle) interactiveTitle.textContent = 'Interactive map';
+    const interactiveDescription = pricing.querySelector('.feature-grid article:nth-child(2) p');
+    if (interactiveDescription) interactiveDescription.textContent = 'Explanations, source evidence, editing and export are free in this isolated local preview.';
+    const pricingNote = pricing.querySelector('.muted');
+    if (pricingNote) pricingNote.textContent = 'No Stripe checkout or payment is used locally. Scan limits still apply.';
+    const finalStep = document.querySelector('#how-it-works .feature-grid article:last-child p');
+    if (finalStep) finalStep.textContent = 'Explore explanations and evidence, edit your map, and rescan with your human context preserved.';
   }
 }
 $('auth-form').onsubmit = act(async () => {

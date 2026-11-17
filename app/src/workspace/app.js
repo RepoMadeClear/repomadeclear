@@ -36,6 +36,17 @@ function updateSummary(){
  $('summary').textContent=`${sourceCount} source files · ${groups.length} areas`;
  $('classification').textContent=`Evidence suggests: ${data.classification}. Area/role assigned to ${assigned}; ${needsReview} still need role review. Grouping is a reading aid, not proof of runtime behavior.`;
 }
+const repositoryName = typeof saved.scan.repository === 'string' && saved.scan.repository.trim() ? saved.scan.repository : 'Repository unavailable';
+const branchName = typeof saved.scan.branch === 'string' && saved.scan.branch.trim() ? saved.scan.branch : 'Branch unavailable';
+$('repository-context').textContent = `${repositoryName} · Branch: ${branchName}`;
+const mapParams = new URLSearchParams(location.search);
+const returnParams = new URLSearchParams();
+for (const key of ['installation', 'repository']) {
+  if (mapParams.get(key)) returnParams.set(key, mapParams.get(key));
+}
+if (saved.scan.branch) returnParams.set('branch', saved.scan.branch);
+const returnLink = document.querySelector('.back-to-repositories');
+if (returnLink && returnParams.has('repository')) returnLink.href = '/?' + returnParams + '#login';
 updateSummary();
 $('snapshot').textContent=`Saved scan · ${data.commit.slice(0,10)}`;
 const workflowKinds=new Set(['requests-http','may-request-endpoint','handled-by','calls-function','requests-service']);
